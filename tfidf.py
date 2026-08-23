@@ -4,6 +4,7 @@ import pandas as pd
 import nltk
 
 from dataset import load_dataset
+from compare import export_results_to_csv, ResultType
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import KNeighborsClassifier
@@ -23,8 +24,8 @@ except LookupError:
 # Carrega datasets
 # --------------------------------------------------
 
-X_train_texts, y_train = load_dataset("comments_train.txt")
-X_test_texts, y_test = load_dataset("comments_test.txt")
+X_train_texts, y_train = load_dataset("dataset/comments_train.txt")
+X_test_texts, y_test = load_dataset("dataset/comments_test.txt")
 
 # --------------------------------------------------
 # TF-IDF
@@ -57,16 +58,27 @@ model.fit(X_train, y_train)
 # Predição
 # --------------------------------------------------
 predictions = model.predict(X_test)
-# probs = model.predict_proba(X_test)
+probs = model.predict_proba(X_test)
 
 # --------------------------------------------------
 # Avaliação
 # --------------------------------------------------
-from sklearn.metrics import classification_report
+from sklearn.metrics import accuracy_score, classification_report
 
-print("\nEvaluation:")
-print(classification_report(y_test, predictions))
+# print("\nEvaluation:")
+# print(classification_report(y_test, predictions))
 from sklearn.metrics import confusion_matrix
 
 cm = confusion_matrix(y_test, predictions)
-print(cm)
+# print(probs)
+
+# Pega acurácia do TESTE
+test_accuracy = accuracy_score(y_test, predictions)
+print("Acurácia do TESTE: {:.4f}".format(test_accuracy))
+export_results_to_csv(
+    representation="tfidf",
+    result_type=ResultType.TEST,
+    accuracy_validation=0.0,
+    accuracy_test=float(test_accuracy),
+    execution_time=0.0,
+)
