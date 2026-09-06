@@ -3,8 +3,8 @@
 import pandas as pd
 import nltk
 
-from dataset import load_dataset
-from compare import export_results_to_csv, ResultType
+from representation_extraction.dataset.dataset import load_dataset
+from representation_extraction.compare import export_results_to_csv, ResultType
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import KNeighborsClassifier
@@ -24,8 +24,8 @@ except LookupError:
 # Carrega datasets
 # --------------------------------------------------
 
-X_train_texts, y_train = load_dataset("dataset/comments_train.txt")
-X_test_texts, y_test = load_dataset("dataset/comments_test.txt")
+X_train_texts, y_train = load_dataset("comments_train.txt")
+X_test_texts, y_test = load_dataset("comments_test.txt")
 
 # --------------------------------------------------
 # TF-IDF

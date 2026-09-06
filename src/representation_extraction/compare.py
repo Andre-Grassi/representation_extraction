@@ -1,6 +1,10 @@
+from pathlib import Path
+
 import pandas as pd
 import os
 from enum import Enum
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 # Enum para indicar se é teste ou validação
@@ -27,13 +31,13 @@ def export_results_to_csv(
     """
 
     # Cria a pasta 'results/' se não existir
-    os.makedirs("results", exist_ok=True)
+    os.makedirs(PROJECT_ROOT / "results", exist_ok=True)
 
     # Cria a pasta 'results/test' ou 'results/validation' dependendo do tipo de resultado
     if result_type == ResultType.TEST:
-        os.makedirs("results/test", exist_ok=True)
+        os.makedirs(PROJECT_ROOT / "results/test", exist_ok=True)
     elif result_type == ResultType.VALIDATION:
-        os.makedirs("results/validation", exist_ok=True)
+        os.makedirs(PROJECT_ROOT / "results/validation", exist_ok=True)
 
     # Cria o DataFrame com os resultados
     results_df = pd.DataFrame(
@@ -47,9 +51,9 @@ def export_results_to_csv(
 
     # Define o caminho do arquivo CSV
     if result_type == ResultType.TEST:
-        csv_path = os.path.join("results/test", f"{representation}.csv")
+        csv_path = os.path.join(PROJECT_ROOT / "results/test", f"{representation}.csv")
     elif result_type == ResultType.VALIDATION:
-        csv_path = os.path.join("results/validation", f"{representation}.csv")
+        csv_path = os.path.join(PROJECT_ROOT / "results/validation", f"{representation}.csv")
     else:
         raise ValueError("Invalid result_type. Must be 'test' or 'validation'.")
 
