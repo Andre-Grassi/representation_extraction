@@ -3,6 +3,10 @@ from pathlib import Path
 import pandas as pd
 import os
 from enum import Enum
+import argparse
+
+from sklearn.neighbors import KNeighborsClassifier
+from representation_extraction.extractors import tfidf, bow
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,9 +57,49 @@ def export_results_to_csv(
     if result_type == ResultType.TEST:
         csv_path = os.path.join(PROJECT_ROOT / "results/test", f"{representation}.csv")
     elif result_type == ResultType.VALIDATION:
-        csv_path = os.path.join(PROJECT_ROOT / "results/validation", f"{representation}.csv")
+        csv_path = os.path.join(
+            PROJECT_ROOT / "results/validation", f"{representation}.csv"
+        )
     else:
         raise ValueError("Invalid result_type. Must be 'test' or 'validation'.")
 
     # Exporta para CSV
     results_df.to_csv(csv_path, index=False)
+
+
+def run_tfidf(knn):
+    test_accuracy = tfidf.run(knn)
+
+    export_results_to_csv(
+        representation="tfidf",
+        result_type=ResultType.TEST,
+        accuracy_validation=0.0,
+        accuracy_test=test_accuracy,
+        execution_time=0.0,
+    )
+    print("Acurácia do TESTE: {:.4f}".format(test_accuracy))
+
+
+def run_bow(knn):
+
+    test_accuracy = bow.run(knn)
+
+    export_results_to_csv(
+        representation="bow",
+        result_type=ResultType.TEST,
+        accuracy_validation=0.0,
+        accuracy_test=test_accuracy,
+        execution_time=0.0,
+    )
+    print("Acurácia do TESTE: {:.4f}".format(test_accuracy))
+
+
+def main():
+    # Cria knn
+    knn = KNeighborsClassifier(n_neighbors=7, metric="euclidean")
+
+    run_bow(knn)
+
+
+if __name__ == "__main__":
+    main()
