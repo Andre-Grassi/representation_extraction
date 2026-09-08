@@ -27,16 +27,16 @@ EXTRACTORS = {
 
 # Hiperparametros do extrator: quais args pertencem a cada extrator
 EXTRACTOR_PARAMS = {
-    "tfidf": {"max_features", "ngram_range", "min_df", "max_df"},
-    "bow": {"max_features", "ngram_range", "min_df", "max_df"},
-    "bert": {"max_length", "model_name"},
+    "tfidf": {"max_features", "ngram_range", "min_df", "max_df", "normalization"},
+    "bow": {"max_features", "ngram_range", "min_df", "max_df", "normalization"},
+    "bert": {"max_length", "model_name", "normalization"},
 }
 
 # Defaults dos hiperparametros dos extratores
 EXTRACTOR_DEFAULTS = {
-    "tfidf": {"max_features": 350, "ngram_range": (1, 2), "min_df": 2, "max_df": 0.9},
-    "bow": {"max_features": 350, "ngram_range": (1, 2), "min_df": 2, "max_df": 0.9},
-    "bert": {"max_length": 16, "model_name": "bert-base-uncased"},
+    "tfidf": {"max_features": 350, "ngram_range": (1, 2), "min_df": 2, "max_df": 0.9, "normalization": "none"},
+    "bow": {"max_features": 350, "ngram_range": (1, 2), "min_df": 2, "max_df": 0.9, "normalization": "none"},
+    "bert": {"max_length": 16, "model_name": "bert-base-uncased", "normalization": "none"},
 }
 
 # Defaults do KNN
@@ -56,16 +56,17 @@ class ResultType(Enum):
 
 def _build_folder_name(extractor_name: str, ext_params: dict) -> str:
     """Gera o nome da subpasta a partir dos hiperparametros do extrator."""
+    norm = ext_params.get("normalization", "none")
     if extractor_name in ("tfidf", "bow"):
         mf = ext_params["max_features"]
         ng_min, ng_max = ext_params["ngram_range"]
         md = ext_params["min_df"]
         mxd = ext_params["max_df"]
-        return f"mf{mf}_ng{ng_min}-{ng_max}_md{md}_mxd{mxd}"
+        return f"mf{mf}_ng{ng_min}-{ng_max}_md{md}_mxd{mxd}_norm-{norm}"
     elif extractor_name == "bert":
         ml = ext_params["max_length"]
         mn = ext_params["model_name"]
-        return f"ml{ml}_{mn}"
+        return f"ml{ml}_{mn}_norm-{norm}"
     else:
         raise ValueError(f"Extrator desconhecido: {extractor_name}")
 
@@ -338,6 +339,13 @@ def do_extract(extractor_name: str, args):
         stratify=y_train_arr,
     )
 
+    from representation_extraction.dataset.dataset import normalize_features
+
+    print(f"Aplicando normalizacao: {ext_params['normalization']}...")
+    X_train, X_val, X_test = normalize_features(
+        X_train, X_val, X_test, method=ext_params["normalization"]
+    )
+
     # Salva os 6 arquivos
     print(f"Salvando features em features/{extractor_name}/{folder_name}/...")
     _save_features(extractor_name, feat_dir, "X_train", X_train)
@@ -549,6 +557,14 @@ def _add_extractor_args(parser):
         type=str,
         default=None,
         help="Nome do modelo HuggingFace (bert, default: bert-base-uncased)",
+    )
+    # Global
+    parser.add_argument(
+        "--normalization",
+        type=str,
+        default=None,
+        choices=["none", "maxabs", "normalizer"],
+        help="Metodo de normalizacao (default: none)",
     )
 
 
