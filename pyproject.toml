@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "representation-extraction"
+version = "0.1.0"
+description = "Text representation extraction and comparison (BoW, TF-IDF, BERT)"
+readme = "README.md"
+dependencies = [
+    "scikit-learn==1.9.0",
+    "pandas==3.0.5",
+    "numpy==2.5.2",
+    "nltk==3.10.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
