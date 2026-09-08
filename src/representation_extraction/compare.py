@@ -141,30 +141,58 @@ def export_results_to_csv(
     representation: str,
     result_type: ResultType,
     accuracy: float,
+    ext_params: dict,
+    knn_params: dict,
 ):
     """
-    Exporta os resultados do experimento para um arquivo CSV na pasta 'results/{result_type}/{representation}.csv'.
+    Exporta os resultados do experimento para um arquivo CSV unificado, fazendo append das execucoes.
 
     Args:
         representation (str): Nome do metodo de extracao de caracteristicas.
         result_type (ResultType): Tipo de resultado (teste ou validacao).
         accuracy (float): Acuracia obtida.
+        ext_params (dict): Hiperparametros do extrator.
+        knn_params (dict): Hiperparametros do KNN.
     """
     import pandas as pd
 
-    results_dir = PROJECT_ROOT / "results" / result_type.value
+    results_dir = PROJECT_ROOT / "results"
     os.makedirs(results_dir, exist_ok=True)
 
-    results_df = pd.DataFrame(
-        {
-            "Representation": [representation],
-            "Accuracy": [accuracy],
-        }
-    )
+    # Monta a linha de dados combinando tudo
+    data = {
+        "Extractor": representation,
+        "Accuracy": accuracy,
+    }
+    # Adiciona params do extrator convertendo tuplas/listas para string (ex: ngram_range)
+    for k, v in ext_params.items():
+        data[k] = str(v) if isinstance(v, (tuple, list)) else v
+        
+    # Adiciona params do KNN
+    for k, v in knn_params.items():
+        data[k] = v
 
-    csv_path = results_dir / f"{representation}.csv"
-    results_df.to_csv(csv_path, index=False)
-    print(f"  Resultado salvo em: {csv_path}")
+    results_df = pd.DataFrame([data])
+    csv_path = results_dir / f"{result_type.value}_results.csv"
+
+    if not csv_path.exists():
+        results_df.to_csv(csv_path, index=False)
+    else:
+        # Le o CSV existente
+        existing_df = pd.read_csv(csv_path)
+        # Concatena a nova execucao
+        combined_df = pd.concat([existing_df, results_df], ignore_index=True)
+        
+        # Encontra as colunas de parametros (todas exceto Accuracy)
+        param_cols = [col for col in combined_df.columns if col != "Accuracy"]
+        
+        # Remove duplicatas baseadas nos parametros, mantendo sempre a mais recente ('last')
+        combined_df = combined_df.drop_duplicates(subset=param_cols, keep="last")
+        
+        # Salva o arquivo atualizado sobrescrevendo o antigo
+        combined_df.to_csv(csv_path, index=False)
+        
+    print(f"  Resultado salvo/atualizado em: {csv_path}")
 
 
 # --------------------------------------------------
@@ -325,6 +353,8 @@ def do_validate(extractor_name: str, args):
         representation=extractor_name,
         result_type=ResultType.VALIDATION,
         accuracy=accuracy,
+        ext_params=ext_params,
+        knn_params=knn_params,
     )
 
 
@@ -373,6 +403,8 @@ def do_test(extractor_name: str, args):
         representation=extractor_name,
         result_type=ResultType.TEST,
         accuracy=accuracy,
+        ext_params=ext_params,
+        knn_params=knn_params,
     )
 
 
