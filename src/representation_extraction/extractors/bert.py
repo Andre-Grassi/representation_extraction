@@ -28,7 +28,7 @@ def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32):
             batch_texts,
             padding=True,
             truncation=True,
-            max_length=512,
+            max_length=16,
             return_tensors="pt",
         ).to(model.device)
 
@@ -44,6 +44,27 @@ def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32):
 
     X_bert = np.vstack(all_embeddings)
     return X_bert
+
+
+def extract(X_train_texts: list[str], X_test_texts: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Extrai features BERT (CLS embeddings) dos textos de treino e teste.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: (X_train_features, X_test_features) como arrays NumPy densos.
+    """
+    print("Carregando BERT...")
+    model = AutoModel.from_pretrained(
+        "bert-base-uncased", dtype="auto", device_map="auto"
+    )
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    print("Extraindo representação BERT do treino...")
+    X_train = extract_features(model, tokenizer, X_train_texts)
+    print("Extraindo representação BERT do teste...")
+    X_test = extract_features(model, tokenizer, X_test_texts)
+
+    return X_train, X_test
 
 
 def run(knn: KNeighborsClassifier) -> float:
@@ -62,10 +83,10 @@ def run(knn: KNeighborsClassifier) -> float:
     # Carrega datasets
     # --------------------------------------------------
 
-    X_train_texts, y_train = load_dataset("comments_train_few.txt")
+    X_train_texts, y_train = load_dataset("comments_train.txt")
     X_train_texts_bert = X_train_texts.tolist()
     y_train_bert = y_train.tolist()
-    X_test_texts, y_test = load_dataset("comments_test_few.txt")
+    X_test_texts, y_test = load_dataset("comments_test.txt")
     X_test_texts_bert = X_test_texts.tolist()
     y_test_bert = y_test.tolist()
 
