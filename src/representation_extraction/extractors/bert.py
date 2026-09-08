@@ -15,7 +15,7 @@ import torch
 from tqdm import tqdm
 
 
-def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32):
+def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32, max_length: int = 16):
 
     # Extrai embeddings de batch_size em batch_size para evitar estouro de memória
     all_embeddings = []
@@ -28,7 +28,7 @@ def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32):
             batch_texts,
             padding=True,
             truncation=True,
-            max_length=16,
+            max_length=max_length,
             return_tensors="pt",
         ).to(model.device)
 
@@ -46,23 +46,34 @@ def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32):
     return X_bert
 
 
-def extract(X_train_texts: list[str], X_test_texts: list[str]) -> tuple[np.ndarray, np.ndarray]:
+def extract(
+    X_train_texts: list[str],
+    X_test_texts: list[str],
+    max_length: int = 16,
+    model_name: str = "bert-base-uncased",
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Extrai features BERT (CLS embeddings) dos textos de treino e teste.
+
+    Args:
+        X_train_texts: Textos de treino.
+        X_test_texts: Textos de teste.
+        max_length: Comprimento maximo da sequencia de tokens.
+        model_name: Nome do modelo HuggingFace a usar.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: (X_train_features, X_test_features) como arrays NumPy densos.
     """
-    print("Carregando BERT...")
+    print(f"Carregando modelo {model_name}...")
     model = AutoModel.from_pretrained(
-        "bert-base-uncased", dtype="auto", device_map="auto"
+        model_name, dtype="auto", device_map="auto"
     )
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    print("Extraindo representação BERT do treino...")
-    X_train = extract_features(model, tokenizer, X_train_texts)
-    print("Extraindo representação BERT do teste...")
-    X_test = extract_features(model, tokenizer, X_test_texts)
+    print("Extraindo representacao BERT do treino...")
+    X_train = extract_features(model, tokenizer, X_train_texts, max_length=max_length)
+    print("Extraindo representacao BERT do teste...")
+    X_test = extract_features(model, tokenizer, X_test_texts, max_length=max_length)
 
     return X_train, X_test
 
