@@ -688,7 +688,7 @@ def do_gridsearch(extractor_name: str, args):
         scoring="accuracy",
         cv=3,
         n_jobs=n_jobs,
-        verbose=1,
+        verbose=3,
         return_train_score=False,
     )
 
@@ -906,7 +906,7 @@ Exemplos de uso:
     gridsearch_choices = list(EXTRACTORS.keys())  # sem 'all'
     sub_gridsearch = subparsers.add_parser(
         "gridsearch",
-        help="Executa grid search exaustivo (5-fold CV) sobre hiperparametros",
+        help="Executa grid search exaustivo (3-fold CV) sobre hiperparametros",
     )
     sub_gridsearch.add_argument(
         "--extractor",
