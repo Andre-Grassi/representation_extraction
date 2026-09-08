@@ -13,9 +13,9 @@ def load_dataset(file_name: str) -> tuple[pd.Series, pd.Series]:
         txt_path (str): Caminho para o arquivo de texto contendo o dataset.
 
     Returns:
-        tuple[list[str], list[str]]: Uma tupla contendo duas listas:
-            - A primeira lista contém os textos (reviews) do dataset.
-            - A segunda lista contém os rótulos (labels) correspondentes aos textos.
+        tuple[pd.Series, pd.Series]: Uma tupla contendo duas séries do pandas:
+            - A primeira série contém os textos (reviews).
+            - A segunda série contém os rótulos (labels).
     """
     # Se um caminho abosluto for fornecido, use-o diretamente; caso contrário, construa o caminho relativo ao diretório do dataset
     file_path = Path(file_name)
