@@ -1,4 +1,4 @@
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 
 def get_statistics(y_true, y_pred, time_metrics: dict) -> dict:
     """
@@ -12,12 +12,15 @@ def get_statistics(y_true, y_pred, time_metrics: dict) -> dict:
     precision, recall, f1_score, _ = precision_recall_fscore_support(
         y_true, y_pred, average="macro", zero_division=0
     )
+    
+    cm = confusion_matrix(y_true, y_pred)
 
     stats = {
         "Accuracy": accuracy,
         "Precision": precision,
         "Recall": recall,
         "F1_Score": f1_score,
+        "Confusion_Matrix": cm.tolist(),
     }
 
     if time_metrics:
