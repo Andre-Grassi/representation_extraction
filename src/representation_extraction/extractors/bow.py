@@ -19,9 +19,24 @@ def _get_stopwords():
         return stopwords.words("english")
 
 
-def extract(X_train_texts, X_test_texts) -> tuple[csr_matrix, csr_matrix]:
+def extract(
+    X_train_texts,
+    X_test_texts,
+    max_features: int = 350,
+    ngram_range: tuple[int, int] = (1, 2),
+    min_df: int = 2,
+    max_df: float = 0.9,
+) -> tuple[csr_matrix, csr_matrix]:
     """
     Extrai features Bag of Words dos textos de treino e teste.
+
+    Args:
+        X_train_texts: Textos de treino.
+        X_test_texts: Textos de teste.
+        max_features: Numero maximo de features.
+        ngram_range: Range de n-grams (min, max).
+        min_df: Frequencia minima do documento.
+        max_df: Frequencia maxima do documento.
 
     Returns:
         tuple[csr_matrix, csr_matrix]: (X_train_features, X_test_features) como matrizes esparsas CSR.
@@ -30,11 +45,11 @@ def extract(X_train_texts, X_test_texts) -> tuple[csr_matrix, csr_matrix]:
 
     vectorizer = CountVectorizer(
         stop_words=stop_words_en,
-        max_features=350,
-        ngram_range=(1, 2),
+        max_features=max_features,
+        ngram_range=ngram_range,
         lowercase=True,
-        min_df=2,
-        max_df=0.9,
+        min_df=min_df,
+        max_df=max_df,
     )
 
     X_train = vectorizer.fit_transform(X_train_texts)
