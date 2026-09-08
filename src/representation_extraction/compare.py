@@ -45,6 +45,37 @@ EXTRACTOR_DEFAULTS = {
 # Defaults do KNN
 KNN_DEFAULTS = {"n_neighbors": 7, "metric": "euclidean", "weights": "uniform"}
 
+# --------------------------------------------------
+# Grids para o Grid Search (param_grid para GridSearchCV com Pipeline)
+# Prefixos: extractor__ para hiperparametros do extrator, knn__ para KNN.
+# --------------------------------------------------
+
+GRIDSEARCH_PARAM_GRIDS = {
+    "bow": {
+        "extractor__max_features": [100, 250, 500, 1000],
+        "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
+        "extractor__min_df": [1, 2, 3],
+        "extractor__max_df": [0.8, 0.9, 1.0],
+        "knn__n_neighbors": [3, 5, 7, 9, 11],
+        "knn__metric": ["euclidean", "cosine", "manhattan"],
+        "knn__weights": ["uniform", "distance"],
+    },
+    "tfidf": {
+        "extractor__max_features": [100, 250, 500, 1000],
+        "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
+        "extractor__min_df": [1, 2, 3],
+        "extractor__max_df": [0.8, 0.9, 1.0],
+        "knn__n_neighbors": [3, 5, 7, 9, 11],
+        "knn__metric": ["euclidean", "cosine", "manhattan"],
+        "knn__weights": ["uniform", "distance"],
+    },
+    "bert": {
+        "knn__n_neighbors": [3, 5, 7, 9, 11],
+        "knn__metric": ["euclidean", "cosine", "manhattan"],
+        "knn__weights": ["uniform", "distance"],
+    },
+}
+
 
 # Enum para indicar se eh teste ou validacao
 class ResultType(Enum):
@@ -559,6 +590,112 @@ def do_stats(extractor_name: str, args):
     )
 
 
+def do_gridsearch(extractor_name: str, args):
+    """
+    Etapa de Grid Search: usa Pipeline (extrator + KNN) com GridSearchCV do sklearn
+    para buscar exaustivamente todas as combinacoes de hiperparametros.
+    O sklearn cuida de todas as permutacoes e do 5-fold CV internamente.
+    Salva os resultados em results/{extractor}/gridsearch_results.csv.
+    """
+    import pandas as pd
+    from sklearn.model_selection import GridSearchCV
+    from sklearn.pipeline import Pipeline
+    from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+    from nltk.corpus import stopwords
+    import nltk
+
+    if extractor_name == "all":
+        raise ValueError("Grid search deve ser executado para um extrator especifico, nao 'all'.")
+
+    normalization = getattr(args, "normalization", None) or "none"
+    param_grid = GRIDSEARCH_PARAM_GRIDS[extractor_name]
+
+    # Monta o Pipeline de acordo com o extrator
+    try:
+        stop_words_en = stopwords.words("english")
+    except LookupError:
+        nltk.download("stopwords")
+        stop_words_en = stopwords.words("english")
+
+    if extractor_name == "bow":
+        extractor_step = CountVectorizer(stop_words=stop_words_en, lowercase=True)
+    elif extractor_name == "tfidf":
+        extractor_step = TfidfVectorizer(stop_words=stop_words_en, lowercase=True)
+    elif extractor_name == "bert":
+        raise NotImplementedError("Grid search com Pipeline nao suportado para BERT (requer transformer wrapper).")
+
+    # Monta pipeline com ou sem normalizacao
+    steps = [("extractor", extractor_step)]
+
+    if normalization != "none":
+        from sklearn.preprocessing import MaxAbsScaler, Normalizer
+        if normalization == "maxabs":
+            steps.append(("normalizer", MaxAbsScaler()))
+        elif normalization == "normalizer":
+            steps.append(("normalizer", Normalizer()))
+
+    steps.append(("knn", KNeighborsClassifier()))
+    pipe = Pipeline(steps)
+
+    # Contagem de combinacoes para log
+    from sklearn.model_selection import ParameterGrid
+    total_combos = len(ParameterGrid(param_grid))
+
+    print(f"\n{'='*60}")
+    print(f"  GRID SEARCH - {extractor_name.upper()}")
+    print(f"  Pipeline: {' -> '.join(name for name, _ in steps)}")
+    print(f"  Total de combinacoes: {total_combos}")
+    print(f"  Folds: 5 (StratifiedKFold)")
+    print(f"  Total de fits: {total_combos * 5}")
+    print(f"  Normalizacao: {normalization}")
+    print(f"{'='*60}\n")
+
+    # Carrega dataset
+    print("Carregando dataset...")
+    X_train_texts, y_train = load_dataset("comments_train.txt")
+    y_train_arr = np.array(y_train)
+
+    # GridSearchCV cuida de TUDO: permutacoes, folds, fit, score
+    grid_cv = GridSearchCV(
+        pipe,
+        param_grid=param_grid,
+        scoring="accuracy",
+        cv=5,
+        n_jobs=1,
+        verbose=1,
+        return_train_score=False,
+    )
+
+    print("Rodando GridSearchCV...")
+    t1 = time.perf_counter()
+    grid_cv.fit(X_train_texts, y_train_arr)
+    t2 = time.perf_counter()
+
+    print(f"\nGridSearchCV concluido em {t2 - t1:.2f}s")
+    print(f"Melhor accuracy: {grid_cv.best_score_:.4f}")
+    print(f"Melhores params: {grid_cv.best_params_}")
+
+    # Converte cv_results_ diretamente para DataFrame e salva
+    results_dir = PROJECT_ROOT / "results" / extractor_name
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = results_dir / "gridsearch_results.csv"
+
+    results_df = pd.DataFrame(grid_cv.cv_results_)
+    results_df = results_df.sort_values("rank_test_score")
+    results_df.insert(0, "normalization", normalization)
+    results_df.to_csv(csv_path, index=False)
+
+    print(f"\n{'='*60}")
+    print(f"  GRID SEARCH CONCLUIDO - {extractor_name.upper()}")
+    print(f"  Total de combinacoes avaliadas: {total_combos}")
+    print(f"  Resultados salvos em: {csv_path}")
+    print(f"  Top 5 resultados:")
+    top5 = results_df.head(5)
+    for idx, row in top5.iterrows():
+        print(f"    #{int(row['rank_test_score'])}: accuracy={row['mean_test_score']:.4f} (+/-{row['std_test_score']:.4f}) | {row['params']}")
+    print(f"{'='*60}\n")
+
+
 def do_all(extractor_name: str, args):
     """Roda extract -> validate -> stats(val) -> test -> stats(test) em sequencia."""
     do_extract(extractor_name, args)
@@ -736,6 +873,25 @@ Exemplos de uso:
     )
     _add_extractor_args(sub_stats)
 
+    # gridsearch: apenas --extractor e --normalization, grids hardcoded
+    gridsearch_choices = list(EXTRACTORS.keys())  # sem 'all'
+    sub_gridsearch = subparsers.add_parser(
+        "gridsearch", help="Executa grid search exaustivo (5-fold CV) sobre hiperparametros"
+    )
+    sub_gridsearch.add_argument(
+        "--extractor",
+        required=True,
+        choices=gridsearch_choices,
+        help="Extrator a usar (sem 'all')",
+    )
+    sub_gridsearch.add_argument(
+        "--normalization",
+        type=str,
+        default=None,
+        choices=["none", "maxabs", "normalizer"],
+        help="Metodo de normalizacao (default: none)",
+    )
+
     # all: hiper. do extrator + hiper. do KNN
     sub_all = subparsers.add_parser(
         "all", help="Roda extract -> validate -> stats -> test -> stats em sequencia"
@@ -757,7 +913,7 @@ def main():
     args = parser.parse_args()
 
     # Valida hiperparametros do extrator
-    if args.extractor != "all":
+    if args.extractor != "all" and args.stage not in ("gridsearch",):
         _validate_extractor_args(args.extractor, args)
 
     stage_map = {
@@ -765,6 +921,7 @@ def main():
         "validate": do_validate,
         "test": do_test,
         "stats": do_stats,
+        "gridsearch": do_gridsearch,
         "all": do_all,
     }
 
