@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import pandas as pd
+import numpy as np
 import nltk
 
 from representation_extraction.dataset.dataset import load_dataset
@@ -11,22 +12,37 @@ from nltk.corpus import stopwords
 
 from transformers import AutoModel, AutoTokenizer
 import torch
+from tqdm import tqdm
 
 
-def extract_features(model, tokenizer, texts: list[str]):
-    model_inputs = tokenizer(
-        texts,
-        padding=True,
-        truncation=True,
-        max_length=512,
-        return_tensors="pt",
-    ).to(model.device)
+def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32):
 
-    with torch.no_grad():
-        model_outputs = model(**model_inputs)
+    # Extrai embeddings de batch_size em batch_size para evitar estouro de memória
+    all_embeddings = []
+    all_texts = len(texts)
 
-    embeddings_cls = model_outputs.last_hidden_state[:, 0, :]
-    X_bert = embeddings_cls.cpu().numpy()
+    for i in tqdm(range(0, all_texts, batch_size), desc="Extraindo embeddings BERT"):
+        batch_texts = texts[i : i + batch_size]
+
+        model_inputs = tokenizer(
+            batch_texts,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        ).to(model.device)
+
+        with torch.no_grad():
+            model_outputs = model(**model_inputs)
+
+        embeddings_cls = model_outputs.last_hidden_state[:, 0, :]
+        all_embeddings.append(embeddings_cls)
+
+        # Libera memória cache do PyTorch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    X_bert = np.vstack(all_embeddings)
     return X_bert
 
 
@@ -66,15 +82,15 @@ def run(knn: KNeighborsClassifier) -> float:
     # BERT
     # --------------------------------------------------
     print("Extraindo representacao...")
-    X_train_bert = extract_features(model, tokenizer, X_train_texts_bert)
-    X_test_bert = extract_features(model, tokenizer, X_test_texts_bert)
-    knn.fit(X_train_bert, y_train)
+    X_train = extract_features(model, tokenizer, X_train_texts_bert)
+    X_test = extract_features(model, tokenizer, X_test_texts_bert)
+    knn.fit(X_train, y_train)
 
     # --------------------------------------------------
     # Predição
     # --------------------------------------------------
-    predictions = knn.predict(X_test_bert)
-    probs = knn.predict_proba(X_test_bert)
+    predictions = knn.predict(X_test)
+    probs = knn.predict_proba(X_test)
 
     # --------------------------------------------------
     # Avaliação
