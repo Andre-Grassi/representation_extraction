@@ -5,6 +5,7 @@ import numpy as np
 import os
 from enum import Enum
 import argparse
+import time
 
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split
@@ -167,7 +168,7 @@ def export_results_to_csv(
     # Adiciona params do extrator convertendo tuplas/listas para string (ex: ngram_range)
     for k, v in ext_params.items():
         data[k] = str(v) if isinstance(v, (tuple, list)) else v
-        
+
     # Adiciona params do KNN
     for k, v in knn_params.items():
         data[k] = v
@@ -182,16 +183,16 @@ def export_results_to_csv(
         existing_df = pd.read_csv(csv_path)
         # Concatena a nova execucao
         combined_df = pd.concat([existing_df, results_df], ignore_index=True)
-        
+
         # Encontra as colunas de parametros (todas exceto Accuracy)
         param_cols = [col for col in combined_df.columns if col != "Accuracy"]
-        
+
         # Remove duplicatas baseadas nos parametros, mantendo sempre a mais recente ('last')
         combined_df = combined_df.drop_duplicates(subset=param_cols, keep="last")
-        
+
         # Salva o arquivo atualizado sobrescrevendo o antigo
         combined_df.to_csv(csv_path, index=False)
-        
+
     print(f"  Resultado salvo/atualizado em: {csv_path}")
 
 
@@ -237,6 +238,23 @@ def _load_labels(feat_dir: Path, name: str):
 # --------------------------------------------------
 
 
+def _predict_in_batches(model, X, batch_size=500):
+    """
+    Faz predicoes em lotes (batches) para evitar ArrayMemoryError no KNN.
+    Em vez de predizer X inteiro de uma vez, divide em lotes menores.
+    """
+    import numpy as np
+    predictions = []
+    num_samples = X.shape[0]
+    
+    for i in range(0, num_samples, batch_size):
+        X_batch = X[i : i + batch_size]
+        pred_batch = model.predict(X_batch)
+        predictions.append(pred_batch)
+        
+    return np.concatenate(predictions)
+
+
 def do_extract(extractor_name: str, args):
     """
     Etapa de extracao: carrega dataset, extrai features, faz split 80/20 estratificado,
@@ -266,9 +284,11 @@ def do_extract(extractor_name: str, args):
 
     # Extrai features com hiperparametros
     print(f"Extraindo features com {extractor_name}...")
+    t1_extract = time.perf_counter()
     if extractor_name in ("tfidf", "bow"):
         X_train_full, X_test = ext_module.extract(
-            X_train_texts, X_test_texts,
+            X_train_texts,
+            X_test_texts,
             max_features=ext_params["max_features"],
             ngram_range=ext_params["ngram_range"],
             min_df=ext_params["min_df"],
@@ -276,18 +296,25 @@ def do_extract(extractor_name: str, args):
         )
     elif extractor_name == "bert":
         X_train_full, X_test = ext_module.extract(
-            X_train_texts, X_test_texts,
+            X_train_texts,
+            X_test_texts,
             max_length=ext_params["max_length"],
             model_name=ext_params["model_name"],
         )
+    t2_extract = time.perf_counter()
+
+    print(f"[METRICA] Extracao: {t2_extract - t1_extract:.4f}s")
 
     # Split estratificado 80/20 para validacao
     print("Fazendo split 80/20 estratificado...")
     y_train_arr = np.array(y_train)
 
     X_train, X_val, y_train_split, y_val = train_test_split(
-        X_train_full, y_train_arr,
-        test_size=0.20, random_state=42, stratify=y_train_arr,
+        X_train_full,
+        y_train_arr,
+        test_size=0.20,
+        random_state=42,
+        stratify=y_train_arr,
     )
 
     # Salva os 6 arquivos
@@ -341,10 +368,17 @@ def do_validate(extractor_name: str, args):
 
     knn = KNeighborsClassifier(**knn_params)
     print("Treinando KNN...")
+    t1_train = time.perf_counter()
     knn.fit(X_train, y_train)
+    t2_train = time.perf_counter()
+    print(f"[METRICA] Treinamento KNN: {t2_train - t1_train:.4f}s")
 
-    print("Predizendo no conjunto de validacao...")
-    predictions = knn.predict(X_val)
+    print("Predizendo no conjunto de validacao em lotes...")
+    t1_predict = time.perf_counter()
+    predictions = _predict_in_batches(knn, X_val, batch_size=500)
+    t2_predict = time.perf_counter()
+    print(f"[METRICA] Predicao: {t2_predict - t1_predict:.4f}s")
+
     accuracy = float(accuracy_score(y_val, predictions))
 
     print(f"  Acuracia de VALIDACAO: {accuracy:.4f}")
@@ -391,10 +425,16 @@ def do_test(extractor_name: str, args):
 
     knn = KNeighborsClassifier(**knn_params)
     print("Treinando KNN...")
+    t1_train = time.perf_counter()
     knn.fit(X_train, y_train)
+    t2_train = time.perf_counter()
+    print(f"[METRICA] Treinamento KNN: {t2_train - t1_train:.4f}s")
 
-    print("Predizendo no conjunto de teste...")
-    predictions = knn.predict(X_test)
+    print("Predizendo no conjunto de teste em lotes...")
+    t1_predict = time.perf_counter()
+    predictions = _predict_in_batches(knn, X_test, batch_size=500)
+    t2_predict = time.perf_counter()
+    print(f"[METRICA] Predicao: {t2_predict - t1_predict:.4f}s")
     accuracy = float(accuracy_score(y_test, predictions))
 
     print(f"  Acuracia de TESTE: {accuracy:.4f}")
@@ -438,28 +478,42 @@ def _add_extractor_args(parser):
     """Adiciona argumentos de hiperparametros dos extratores ao parser."""
     # BoW / TF-IDF
     parser.add_argument(
-        "--max-features", type=int, default=None,
+        "--max-features",
+        type=int,
+        default=None,
         help="Numero maximo de features (bow/tfidf, default: 350)",
     )
     parser.add_argument(
-        "--ngram-range", type=int, nargs=2, default=None, metavar=("MIN", "MAX"),
+        "--ngram-range",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar=("MIN", "MAX"),
         help="Range de n-grams (bow/tfidf, default: 1 2)",
     )
     parser.add_argument(
-        "--min-df", type=int, default=None,
+        "--min-df",
+        type=int,
+        default=None,
         help="Frequencia minima de documento (bow/tfidf, default: 2)",
     )
     parser.add_argument(
-        "--max-df", type=float, default=None,
+        "--max-df",
+        type=float,
+        default=None,
         help="Frequencia maxima de documento (bow/tfidf, default: 0.9)",
     )
     # BERT
     parser.add_argument(
-        "--max-length", type=int, default=None,
+        "--max-length",
+        type=int,
+        default=None,
         help="Comprimento maximo da sequencia de tokens (bert, default: 16)",
     )
     parser.add_argument(
-        "--model-name", type=str, default=None,
+        "--model-name",
+        type=str,
+        default=None,
         help="Nome do modelo HuggingFace (bert, default: bert-base-uncased)",
     )
 
@@ -467,15 +521,22 @@ def _add_extractor_args(parser):
 def _add_knn_args(parser):
     """Adiciona argumentos de hiperparametros do KNN ao parser."""
     parser.add_argument(
-        "--n-neighbors", type=int, default=None,
+        "--n-neighbors",
+        type=int,
+        default=None,
         help="Numero de vizinhos do KNN (default: 7)",
     )
     parser.add_argument(
-        "--metric", type=str, default=None,
+        "--metric",
+        type=str,
+        default=None,
         help="Metrica de distancia do KNN (default: euclidean)",
     )
     parser.add_argument(
-        "--weights", type=str, default=None, choices=["uniform", "distance"],
+        "--weights",
+        type=str,
+        default=None,
+        choices=["uniform", "distance"],
         help="Peso dos vizinhos do KNN (default: uniform)",
     )
 
@@ -500,17 +561,25 @@ Exemplos de uso:
     extractor_choices = list(EXTRACTORS.keys()) + ["all"]
 
     # extract: hiper. do extrator
-    sub_extract = subparsers.add_parser("extract", help="Extrai features e salva em disco")
+    sub_extract = subparsers.add_parser(
+        "extract", help="Extrai features e salva em disco"
+    )
     sub_extract.add_argument(
-        "--extractor", required=True, choices=extractor_choices,
+        "--extractor",
+        required=True,
+        choices=extractor_choices,
         help="Extrator a usar (ou 'all' para todos)",
     )
     _add_extractor_args(sub_extract)
 
     # validate: hiper. do extrator (para localizar pasta) + hiper. do KNN
-    sub_validate = subparsers.add_parser("validate", help="Valida usando features pre-extraidas (split 80/20)")
+    sub_validate = subparsers.add_parser(
+        "validate", help="Valida usando features pre-extraidas (split 80/20)"
+    )
     sub_validate.add_argument(
-        "--extractor", required=True, choices=extractor_choices,
+        "--extractor",
+        required=True,
+        choices=extractor_choices,
         help="Extrator a usar (ou 'all' para todos)",
     )
     _add_extractor_args(sub_validate)
@@ -519,16 +588,22 @@ Exemplos de uso:
     # test: hiper. do extrator (para localizar pasta) + hiper. do KNN
     sub_test = subparsers.add_parser("test", help="Testa usando features pre-extraidas")
     sub_test.add_argument(
-        "--extractor", required=True, choices=extractor_choices,
+        "--extractor",
+        required=True,
+        choices=extractor_choices,
         help="Extrator a usar (ou 'all' para todos)",
     )
     _add_extractor_args(sub_test)
     _add_knn_args(sub_test)
 
     # all: hiper. do extrator + hiper. do KNN
-    sub_all = subparsers.add_parser("all", help="Roda extract -> validate -> test em sequencia")
+    sub_all = subparsers.add_parser(
+        "all", help="Roda extract -> validate -> test em sequencia"
+    )
     sub_all.add_argument(
-        "--extractor", required=True, choices=extractor_choices,
+        "--extractor",
+        required=True,
+        choices=extractor_choices,
         help="Extrator a usar (ou 'all' para todos)",
     )
     _add_extractor_args(sub_all)
