@@ -17,6 +17,9 @@ from representation_extraction.extractors import tfidf, bow, bert
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FEATURES_DIR = PROJECT_ROOT / "features"
+PREDICTIONS_DIR = PROJECT_ROOT / "predictions"
+
+from representation_extraction.statistics.statistics import get_statistics
 
 # Extratores disponiveis e se suas features sao esparsas
 EXTRACTORS = {
@@ -409,24 +412,26 @@ def do_validate(extractor_name: str, args):
     t2_predict = time.perf_counter()
     print(f"[METRICA] Predicao: {t2_predict - t1_predict:.4f}s")
 
-    accuracy = float(accuracy_score(y_val, predictions))
-
-    print(f"  Acuracia de VALIDACAO: {accuracy:.4f}")
-
-    export_results_to_csv(
-        representation=extractor_name,
-        result_type=ResultType.VALIDATION,
-        accuracy=accuracy,
-        ext_params=ext_params,
-        knn_params=knn_params,
-        metrics={
-            "time_extraction_s": _load_params_json(feat_dir)
-            .get("metrics", {})
-            .get("time_extraction_s", 0.0),
+    pred_dir = PREDICTIONS_DIR / "validation" / extractor_name / folder_name
+    os.makedirs(pred_dir, exist_ok=True)
+    
+    np.save(pred_dir / "predictions.npy", predictions)
+    
+    pred_params = {
+        "extractor": extractor_name,
+        "ext_params": ext_params,
+        "knn_params": knn_params,
+        "metrics": {
+            "time_extraction_s": _load_params_json(feat_dir).get("metrics", {}).get("time_extraction_s", 0.0),
             "time_knn_train_s": t2_train - t1_train,
             "time_knn_predict_s": t2_predict - t1_predict,
-        },
-    )
+        }
+    }
+    
+    with open(pred_dir / "params.json", "w", encoding="utf-8") as f:
+        json.dump(pred_params, f, indent=2)
+        
+    print(f"  Predicoes e tempos salvos em: {pred_dir}\n")
 
 
 def do_test(extractor_name: str, args):
@@ -472,29 +477,99 @@ def do_test(extractor_name: str, args):
     predictions = _predict_in_batches(knn, X_test, batch_size=500)
     t2_predict = time.perf_counter()
     print(f"[METRICA] Predicao: {t2_predict - t1_predict:.4f}s")
-    accuracy = float(accuracy_score(y_test, predictions))
+    pred_dir = PREDICTIONS_DIR / "test" / extractor_name / folder_name
+    os.makedirs(pred_dir, exist_ok=True)
+    
+    np.save(pred_dir / "predictions.npy", predictions)
+    
+    pred_params = {
+        "extractor": extractor_name,
+        "ext_params": ext_params,
+        "knn_params": knn_params,
+        "metrics": {
+            "time_extraction_s": _load_params_json(feat_dir).get("metrics", {}).get("time_extraction_s", 0.0),
+            "time_knn_train_s": t2_train - t1_train,
+            "time_knn_predict_s": t2_predict - t1_predict,
+        }
+    }
+    
+    with open(pred_dir / "params.json", "w", encoding="utf-8") as f:
+        json.dump(pred_params, f, indent=2)
+        
+    print(f"  Predicoes e tempos salvos em: {pred_dir}\n")
 
-    print(f"  Acuracia de TESTE: {accuracy:.4f}")
 
+def do_stats(extractor_name: str, args):
+    """
+    Etapa de estatisticas: carrega as predicoes salvas, true labels e hiperparametros.
+    Calcula todas as metricas e salva no CSV.
+    """
+    res_type_str = getattr(args, "result_type", None)
+    if not res_type_str:
+        raise ValueError("--result-type e obrigatorio para a etapa stats")
+    
+    res_type = ResultType(res_type_str)
+    ext_params = _get_extractor_params(extractor_name, args)
+    folder_name = _build_folder_name(extractor_name, ext_params)
+    
+    feat_dir = FEATURES_DIR / extractor_name / folder_name
+    pred_dir = PREDICTIONS_DIR / res_type.value / extractor_name / folder_name
+    
+    if not pred_dir.exists():
+        raise FileNotFoundError(
+            f"Pasta de predicoes nao encontrada: {pred_dir}\n"
+            f"Execute primeiro a etapa correspondente (validate ou test)."
+        )
+
+    print(f"\n{'='*60}")
+    print(f"  ESTATISTICAS - {extractor_name.upper()} ({res_type.value})")
+    print(f"{'='*60}")
+    
+    # Carrega as labels verdadeiras (y_true) a partir do diretorio de features
+    if res_type == ResultType.VALIDATION:
+        y_true = _load_labels(feat_dir, "y_val")
+    else:
+        y_true = _load_labels(feat_dir, "y_test")
+        
+    y_pred = np.load(pred_dir / "predictions.npy", allow_pickle=True)
+    
+    with open(pred_dir / "params.json", "r", encoding="utf-8") as f:
+        pred_params = json.load(f)
+        
+    time_metrics = pred_params.get("metrics", {})
+    # O knn params salvo na predicao eh a fonte da verdade para o deduplicador
+    real_knn_params = pred_params.get("knn_params", _get_knn_params(args))
+    
+    stats = get_statistics(y_true, y_pred, time_metrics)
+    accuracy = stats.pop("Accuracy")
+    
+    # Opcional: mostrar logs resumidos
+    print(f"  Accuracy: {accuracy:.4f}")
+    print(f"  Precision: {stats['Precision']:.4f}")
+    print(f"  Recall: {stats['Recall']:.4f}")
+    print(f"  F1_Score: {stats['F1_Score']:.4f}")
+    
     export_results_to_csv(
         representation=extractor_name,
-        result_type=ResultType.TEST,
+        result_type=res_type,
         accuracy=accuracy,
         ext_params=ext_params,
-        knn_params=knn_params,
-        metrics={
-            "time_extraction_s": f"{_load_params_json(feat_dir).get("metrics", {}).get("time_extraction_s", 0.0):.4f}",
-            "time_knn_train_s": f"{t2_train - t1_train:.4f}",
-            "time_knn_predict_s": f"{t2_predict - t1_predict:.4f}",
-        },
+        knn_params=real_knn_params,
+        metrics=stats,
     )
 
 
 def do_all(extractor_name: str, args):
-    """Roda extract -> validate -> test em sequencia."""
+    """Roda extract -> validate -> stats(val) -> test -> stats(test) em sequencia."""
     do_extract(extractor_name, args)
+    
     do_validate(extractor_name, args)
+    args.result_type = "validation"
+    do_stats(extractor_name, args)
+    
     do_test(extractor_name, args)
+    args.result_type = "test"
+    do_stats(extractor_name, args)
 
 
 # --------------------------------------------------
@@ -593,14 +668,13 @@ def _add_knn_args(parser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Pipeline de extracao, validacao e teste de representacoes textuais.",
+        description="Pipeline de extracao, validacao, teste e avaliacao de representacoes textuais.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Exemplos de uso:
   python compare.py extract  --extractor tfidf
-  python compare.py extract  --extractor tfidf --max-features 500 --ngram-range 1 3
-  python compare.py extract  --extractor bert --max-length 64 --model-name distilbert-base-uncased
-  python compare.py validate --extractor tfidf --n-neighbors 5 --metric cosine
+  python compare.py validate --extractor tfidf --n-neighbors 5
+  python compare.py stats    --extractor tfidf --result-type validation
   python compare.py test     --extractor bow
   python compare.py all      --extractor all
 """,
@@ -645,10 +719,26 @@ Exemplos de uso:
     )
     _add_extractor_args(sub_test)
     _add_knn_args(sub_test)
+    
+    # stats: hiper. do extrator para achar a pasta e result type
+    sub_stats = subparsers.add_parser("stats", help="Gera as estatisticas usando predicoes salvas")
+    sub_stats.add_argument(
+        "--extractor",
+        required=True,
+        choices=extractor_choices,
+        help="Extrator a usar (ou 'all' para todos)",
+    )
+    sub_stats.add_argument(
+        "--result-type",
+        type=str,
+        choices=["validation", "test"],
+        help="Qual predicao analisar (validation ou test)",
+    )
+    _add_extractor_args(sub_stats)
 
     # all: hiper. do extrator + hiper. do KNN
     sub_all = subparsers.add_parser(
-        "all", help="Roda extract -> validate -> test em sequencia"
+        "all", help="Roda extract -> validate -> stats -> test -> stats em sequencia"
     )
     sub_all.add_argument(
         "--extractor",
@@ -674,6 +764,7 @@ def main():
         "extract": do_extract,
         "validate": do_validate,
         "test": do_test,
+        "stats": do_stats,
         "all": do_all,
     }
 
