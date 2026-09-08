@@ -30,7 +30,7 @@ def run(knn: KNeighborsClassifier) -> float:
     X_test_texts, y_test = load_dataset("comments_test.txt")
 
     # --------------------------------------------------
-    # TF-IDF
+    # Bag of Words
     # --------------------------------------------------
     print("Extraindo representacao...")
     vectorizer = CountVectorizer(
