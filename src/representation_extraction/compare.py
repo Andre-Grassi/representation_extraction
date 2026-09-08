@@ -71,7 +71,7 @@ from sklearn.preprocessing import MaxAbsScaler, Normalizer
 
 GRIDSEARCH_PARAM_GRIDS = {
     "bow": {
-        "extractor__max_features": [100, 250, 500, 1000],
+        "extractor__max_features": [250, 500, 1000],
         "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
         "extractor__min_df": [1, 2, 3],
         "extractor__max_df": [0.8, 0.9, 1.0],
@@ -81,7 +81,7 @@ GRIDSEARCH_PARAM_GRIDS = {
         "knn__weights": ["uniform", "distance"],
     },
     "tfidf": {
-        "extractor__max_features": [100, 250, 500, 1000],
+        "extractor__max_features": [250, 500, 1000],
         "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
         "extractor__min_df": [1, 2, 3],
         "extractor__max_df": [0.8, 0.9, 1.0],
