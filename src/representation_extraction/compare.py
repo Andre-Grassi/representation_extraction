@@ -6,7 +6,7 @@ from enum import Enum
 import argparse
 
 from sklearn.neighbors import KNeighborsClassifier
-from representation_extraction.extractors import tfidf, bow
+from representation_extraction.extractors import tfidf, bow, bert
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -94,11 +94,24 @@ def run_bow(knn):
     print("Acurácia do TESTE: {:.4f}".format(test_accuracy))
 
 
+def run_bert(knn):
+    test_accuracy = bert.run(knn)
+
+    export_results_to_csv(
+        representation="bert",
+        result_type=ResultType.TEST,
+        accuracy_validation=0.0,
+        accuracy_test=test_accuracy,
+        execution_time=0.0,
+    )
+    print("Acurácia do TESTE: {:.4f}".format(test_accuracy))
+
+
 def main():
     # Cria knn
     knn = KNeighborsClassifier(n_neighbors=7, metric="euclidean")
 
-    run_bow(knn)
+    run_bert(knn)
 
 
 if __name__ == "__main__":
