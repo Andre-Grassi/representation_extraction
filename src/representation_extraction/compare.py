@@ -681,13 +681,14 @@ def do_gridsearch(extractor_name: str, args):
     y_train_arr = np.array(y_train)
 
     # GridSearchCV cuida de TUDO: permutacoes, folds, fit, score
+    n_jobs = getattr(args, "n_jobs", -1)
     grid_cv = GridSearchCV(
         pipe,
         param_grid=param_grid,
         scoring="accuracy",
         cv=3,
-        n_jobs=-1,
-        verbose=3,
+        n_jobs=n_jobs,
+        verbose=1,
         return_train_score=False,
     )
 
@@ -912,6 +913,12 @@ Exemplos de uso:
         required=True,
         choices=gridsearch_choices,
         help="Extrator a usar (sem 'all')",
+    )
+    sub_gridsearch.add_argument(
+        "--n-jobs",
+        type=int,
+        default=-1,
+        help="Numero de workers em paralelo para o GridSearchCV (default: -1, usa todos os cores)",
     )
 
     # all: hiper. do extrator + hiper. do KNN
