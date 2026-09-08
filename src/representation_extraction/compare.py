@@ -76,8 +76,8 @@ GRIDSEARCH_PARAM_GRIDS = {
         "extractor__min_df": [1, 2, 3],
         "extractor__max_df": [0.8, 0.9, 1.0],
         "scaler": [MaxAbsScaler(), Normalizer()],
-        "knn__n_neighbors": [3, 5, 7, 9, 11],
-        "knn__metric": ["euclidean", "cosine", "manhattan"],
+        "knn__n_neighbors": [3, 7, 11],
+        "knn__metric": ["euclidean", "cosine"],
         "knn__weights": ["uniform", "distance"],
     },
     "tfidf": {
@@ -86,14 +86,14 @@ GRIDSEARCH_PARAM_GRIDS = {
         "extractor__min_df": [1, 2, 3],
         "extractor__max_df": [0.8, 0.9, 1.0],
         "scaler": [MaxAbsScaler(), Normalizer()],
-        "knn__n_neighbors": [3, 5, 7, 9, 11],
-        "knn__metric": ["euclidean", "cosine", "manhattan"],
+        "knn__n_neighbors": [3, 7, 11],
+        "knn__metric": ["euclidean", "cosine"],
         "knn__weights": ["uniform", "distance"],
     },
     "bert": {
         "scaler": [MaxAbsScaler(), Normalizer()],
-        "knn__n_neighbors": [3, 5, 7, 9, 11],
-        "knn__metric": ["euclidean", "cosine", "manhattan"],
+        "knn__n_neighbors": [3, 7, 11],
+        "knn__metric": ["euclidean", "cosine"],
         "knn__weights": ["uniform", "distance"],
     },
 }
@@ -671,8 +671,8 @@ def do_gridsearch(extractor_name: str, args):
     print(f"  GRID SEARCH - {extractor_name.upper()}")
     print(f"  Pipeline: {' -> '.join(name for name, _ in steps)}")
     print(f"  Total de combinacoes: {total_combos}")
-    print(f"  Folds: 5 (StratifiedKFold)")
-    print(f"  Total de fits: {total_combos * 5}")
+    print(f"  Folds: 3 (StratifiedKFold)")
+    print(f"  Total de fits: {total_combos * 3}")
     print(f"{'='*60}\n")
 
     # Carrega dataset
@@ -685,7 +685,7 @@ def do_gridsearch(extractor_name: str, args):
         pipe,
         param_grid=param_grid,
         scoring="accuracy",
-        cv=5,
+        cv=3,
         n_jobs=-1,
         verbose=3,
         return_train_score=False,
