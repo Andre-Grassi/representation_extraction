@@ -120,7 +120,9 @@ def _validate_extractor_args(extractor_name: str, args):
                 )
 
 
-def _save_params_json(features_dir: Path, extractor_name: str, ext_params: dict):
+def _save_params_json(
+    features_dir: Path, extractor_name: str, ext_params: dict, metrics: dict = None
+):
     """Salva params.json na pasta de features."""
     params_to_save = {"extractor": extractor_name}
     for k, v in ext_params.items():
@@ -129,8 +131,18 @@ def _save_params_json(features_dir: Path, extractor_name: str, ext_params: dict)
             params_to_save[k] = list(v)
         else:
             params_to_save[k] = v
+
+    if metrics:
+        params_to_save["metrics"] = metrics
+
     with open(features_dir / "params.json", "w", encoding="utf-8") as f:
         json.dump(params_to_save, f, indent=2)
+
+
+def _load_params_json(features_dir: Path) -> dict:
+    """Carrega params.json da pasta de features."""
+    with open(features_dir / "params.json", "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 # --------------------------------------------------
@@ -144,6 +156,7 @@ def export_results_to_csv(
     accuracy: float,
     ext_params: dict,
     knn_params: dict,
+    metrics: dict = None,
 ):
     """
     Exporta os resultados do experimento para um arquivo CSV unificado, fazendo append das execucoes.
@@ -154,6 +167,7 @@ def export_results_to_csv(
         accuracy (float): Acuracia obtida.
         ext_params (dict): Hiperparametros do extrator.
         knn_params (dict): Hiperparametros do KNN.
+        metrics (dict): Dicionario com as metricas de tempo medidas.
     """
     import pandas as pd
 
@@ -165,6 +179,12 @@ def export_results_to_csv(
         "Extractor": representation,
         "Accuracy": accuracy,
     }
+
+    # Adiciona metricas
+    if metrics:
+        for k, v in metrics.items():
+            data[k] = v
+
     # Adiciona params do extrator convertendo tuplas/listas para string (ex: ngram_range)
     for k, v in ext_params.items():
         data[k] = str(v) if isinstance(v, (tuple, list)) else v
@@ -184,10 +204,10 @@ def export_results_to_csv(
         # Concatena a nova execucao
         combined_df = pd.concat([existing_df, results_df], ignore_index=True)
 
-        # Encontra as colunas de parametros (todas exceto Accuracy)
-        param_cols = [col for col in combined_df.columns if col != "Accuracy"]
+        # As colunas que definem a unicidade da execucao sao apenas o Extrator e os Hiperparametros
+        param_cols = ["Extractor"] + list(ext_params.keys()) + list(knn_params.keys())
 
-        # Remove duplicatas baseadas nos parametros, mantendo sempre a mais recente ('last')
+        # Remove duplicatas baseadas estritamente nos hiperparametros, mantendo sempre a mais recente ('last')
         combined_df = combined_df.drop_duplicates(subset=param_cols, keep="last")
 
         # Salva o arquivo atualizado sobrescrevendo o antigo
@@ -244,14 +264,15 @@ def _predict_in_batches(model, X, batch_size=500):
     Em vez de predizer X inteiro de uma vez, divide em lotes menores.
     """
     import numpy as np
+
     predictions = []
     num_samples = X.shape[0]
-    
+
     for i in range(0, num_samples, batch_size):
         X_batch = X[i : i + batch_size]
         pred_batch = model.predict(X_batch)
         predictions.append(pred_batch)
-        
+
     return np.concatenate(predictions)
 
 
@@ -326,8 +347,9 @@ def do_extract(extractor_name: str, args):
     _save_features(extractor_name, feat_dir, "X_test", X_test)
     _save_labels(feat_dir, "y_test", np.array(y_test))
 
-    # Salva params.json
-    _save_params_json(feat_dir, extractor_name, ext_params)
+    # Salva params.json com a métrica de tempo de extração
+    metrics = {"time_extraction_s": t2_extract - t1_extract}
+    _save_params_json(feat_dir, extractor_name, ext_params, metrics=metrics)
 
     print(f"  X_train shape: {X_train.shape}")
     print(f"  X_val shape:   {X_val.shape}")
@@ -389,6 +411,13 @@ def do_validate(extractor_name: str, args):
         accuracy=accuracy,
         ext_params=ext_params,
         knn_params=knn_params,
+        metrics={
+            "time_extraction_s": _load_params_json(feat_dir)
+            .get("metrics", {})
+            .get("time_extraction_s", 0.0),
+            "time_knn_train_s": t2_train - t1_train,
+            "time_knn_predict_s": t2_predict - t1_predict,
+        },
     )
 
 
@@ -445,6 +474,11 @@ def do_test(extractor_name: str, args):
         accuracy=accuracy,
         ext_params=ext_params,
         knn_params=knn_params,
+        metrics={
+            "time_extraction_s": f"{_load_params_json(feat_dir).get("metrics", {}).get("time_extraction_s", 0.0):.4f}",
+            "time_knn_train_s": f"{t2_train - t1_train:.4f}",
+            "time_knn_predict_s": f"{t2_predict - t1_predict:.4f}",
+        },
     )
 
 
