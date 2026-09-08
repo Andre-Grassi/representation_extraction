@@ -37,17 +37,36 @@ EXTRACTOR_PARAMS = {
 
 # Defaults dos hiperparametros dos extratores
 EXTRACTOR_DEFAULTS = {
-    "tfidf": {"max_features": 350, "ngram_range": (1, 2), "min_df": 2, "max_df": 0.9, "normalization": "none"},
-    "bow": {"max_features": 350, "ngram_range": (1, 2), "min_df": 2, "max_df": 0.9, "normalization": "none"},
-    "bert": {"max_length": 16, "model_name": "bert-base-uncased", "normalization": "none"},
+    "tfidf": {
+        "max_features": 350,
+        "ngram_range": (1, 2),
+        "min_df": 2,
+        "max_df": 0.9,
+        "normalization": "none",
+    },
+    "bow": {
+        "max_features": 350,
+        "ngram_range": (1, 2),
+        "min_df": 2,
+        "max_df": 0.9,
+        "normalization": "none",
+    },
+    "bert": {
+        "max_length": 16,
+        "model_name": "bert-base-uncased",
+        "normalization": "none",
+    },
 }
 
 # Defaults do KNN
 KNN_DEFAULTS = {"n_neighbors": 7, "metric": "euclidean", "weights": "uniform"}
 
+from sklearn.preprocessing import MaxAbsScaler, Normalizer
+
 # --------------------------------------------------
 # Grids para o Grid Search (param_grid para GridSearchCV com Pipeline)
 # Prefixos: extractor__ para hiperparametros do extrator, knn__ para KNN.
+# O passo 'scaler' testa diferentes métodos de normalização.
 # --------------------------------------------------
 
 GRIDSEARCH_PARAM_GRIDS = {
@@ -56,6 +75,7 @@ GRIDSEARCH_PARAM_GRIDS = {
         "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
         "extractor__min_df": [1, 2, 3],
         "extractor__max_df": [0.8, 0.9, 1.0],
+        "scaler": [MaxAbsScaler(), Normalizer()],
         "knn__n_neighbors": [3, 5, 7, 9, 11],
         "knn__metric": ["euclidean", "cosine", "manhattan"],
         "knn__weights": ["uniform", "distance"],
@@ -65,11 +85,13 @@ GRIDSEARCH_PARAM_GRIDS = {
         "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
         "extractor__min_df": [1, 2, 3],
         "extractor__max_df": [0.8, 0.9, 1.0],
+        "scaler": [MaxAbsScaler(), Normalizer()],
         "knn__n_neighbors": [3, 5, 7, 9, 11],
         "knn__metric": ["euclidean", "cosine", "manhattan"],
         "knn__weights": ["uniform", "distance"],
     },
     "bert": {
+        "scaler": [MaxAbsScaler(), Normalizer()],
         "knn__n_neighbors": [3, 5, 7, 9, 11],
         "knn__metric": ["euclidean", "cosine", "manhattan"],
         "knn__weights": ["uniform", "distance"],
@@ -445,23 +467,25 @@ def do_validate(extractor_name: str, args):
 
     pred_dir = PREDICTIONS_DIR / "validation" / extractor_name / folder_name
     os.makedirs(pred_dir, exist_ok=True)
-    
+
     np.save(pred_dir / "predictions.npy", predictions)
-    
+
     pred_params = {
         "extractor": extractor_name,
         "ext_params": ext_params,
         "knn_params": knn_params,
         "metrics": {
-            "time_extraction_s": _load_params_json(feat_dir).get("metrics", {}).get("time_extraction_s", 0.0),
+            "time_extraction_s": _load_params_json(feat_dir)
+            .get("metrics", {})
+            .get("time_extraction_s", 0.0),
             "time_knn_train_s": t2_train - t1_train,
             "time_knn_predict_s": t2_predict - t1_predict,
-        }
+        },
     }
-    
+
     with open(pred_dir / "params.json", "w", encoding="utf-8") as f:
         json.dump(pred_params, f, indent=2)
-        
+
     print(f"  Predicoes e tempos salvos em: {pred_dir}\n")
 
 
@@ -510,23 +534,25 @@ def do_test(extractor_name: str, args):
     print(f"[METRICA] Predicao: {t2_predict - t1_predict:.4f}s")
     pred_dir = PREDICTIONS_DIR / "test" / extractor_name / folder_name
     os.makedirs(pred_dir, exist_ok=True)
-    
+
     np.save(pred_dir / "predictions.npy", predictions)
-    
+
     pred_params = {
         "extractor": extractor_name,
         "ext_params": ext_params,
         "knn_params": knn_params,
         "metrics": {
-            "time_extraction_s": _load_params_json(feat_dir).get("metrics", {}).get("time_extraction_s", 0.0),
+            "time_extraction_s": _load_params_json(feat_dir)
+            .get("metrics", {})
+            .get("time_extraction_s", 0.0),
             "time_knn_train_s": t2_train - t1_train,
             "time_knn_predict_s": t2_predict - t1_predict,
-        }
+        },
     }
-    
+
     with open(pred_dir / "params.json", "w", encoding="utf-8") as f:
         json.dump(pred_params, f, indent=2)
-        
+
     print(f"  Predicoes e tempos salvos em: {pred_dir}\n")
 
 
@@ -538,14 +564,14 @@ def do_stats(extractor_name: str, args):
     res_type_str = getattr(args, "result_type", None)
     if not res_type_str:
         raise ValueError("--result-type e obrigatorio para a etapa stats")
-    
+
     res_type = ResultType(res_type_str)
     ext_params = _get_extractor_params(extractor_name, args)
     folder_name = _build_folder_name(extractor_name, ext_params)
-    
+
     feat_dir = FEATURES_DIR / extractor_name / folder_name
     pred_dir = PREDICTIONS_DIR / res_type.value / extractor_name / folder_name
-    
+
     if not pred_dir.exists():
         raise FileNotFoundError(
             f"Pasta de predicoes nao encontrada: {pred_dir}\n"
@@ -555,31 +581,31 @@ def do_stats(extractor_name: str, args):
     print(f"\n{'='*60}")
     print(f"  ESTATISTICAS - {extractor_name.upper()} ({res_type.value})")
     print(f"{'='*60}")
-    
+
     # Carrega as labels verdadeiras (y_true) a partir do diretorio de features
     if res_type == ResultType.VALIDATION:
         y_true = _load_labels(feat_dir, "y_val")
     else:
         y_true = _load_labels(feat_dir, "y_test")
-        
+
     y_pred = np.load(pred_dir / "predictions.npy", allow_pickle=True)
-    
+
     with open(pred_dir / "params.json", "r", encoding="utf-8") as f:
         pred_params = json.load(f)
-        
+
     time_metrics = pred_params.get("metrics", {})
     # O knn params salvo na predicao eh a fonte da verdade para o deduplicador
     real_knn_params = pred_params.get("knn_params", _get_knn_params(args))
-    
+
     stats = get_statistics(y_true, y_pred, time_metrics)
     accuracy = stats.pop("Accuracy")
-    
+
     # Opcional: mostrar logs resumidos
     print(f"  Accuracy: {accuracy:.4f}")
     print(f"  Precision: {stats['Precision']:.4f}")
     print(f"  Recall: {stats['Recall']:.4f}")
     print(f"  F1_Score: {stats['F1_Score']:.4f}")
-    
+
     export_results_to_csv(
         representation=extractor_name,
         result_type=res_type,
@@ -605,9 +631,10 @@ def do_gridsearch(extractor_name: str, args):
     import nltk
 
     if extractor_name == "all":
-        raise ValueError("Grid search deve ser executado para um extrator especifico, nao 'all'.")
+        raise ValueError(
+            "Grid search deve ser executado para um extrator especifico, nao 'all'."
+        )
 
-    normalization = getattr(args, "normalization", None) or "none"
     param_grid = GRIDSEARCH_PARAM_GRIDS[extractor_name]
 
     # Monta o Pipeline de acordo com o extrator
@@ -622,23 +649,22 @@ def do_gridsearch(extractor_name: str, args):
     elif extractor_name == "tfidf":
         extractor_step = TfidfVectorizer(stop_words=stop_words_en, lowercase=True)
     elif extractor_name == "bert":
-        raise NotImplementedError("Grid search com Pipeline nao suportado para BERT (requer transformer wrapper).")
+        raise NotImplementedError(
+            "Grid search com Pipeline nao suportado para BERT (requer transformer wrapper)."
+        )
 
-    # Monta pipeline com ou sem normalizacao
-    steps = [("extractor", extractor_step)]
-
-    if normalization != "none":
-        from sklearn.preprocessing import MaxAbsScaler, Normalizer
-        if normalization == "maxabs":
-            steps.append(("normalizer", MaxAbsScaler()))
-        elif normalization == "normalizer":
-            steps.append(("normalizer", Normalizer()))
-
-    steps.append(("knn", KNeighborsClassifier()))
+    # Monta pipeline com passo 'scaler' configurado como 'passthrough' por padrao
+    # O GridSearchCV se encarregara de testar os outros definidos no param_grid
+    steps = [
+        ("extractor", extractor_step),
+        ("scaler", "passthrough"),
+        ("knn", KNeighborsClassifier()),
+    ]
     pipe = Pipeline(steps)
 
     # Contagem de combinacoes para log
     from sklearn.model_selection import ParameterGrid
+
     total_combos = len(ParameterGrid(param_grid))
 
     print(f"\n{'='*60}")
@@ -647,7 +673,6 @@ def do_gridsearch(extractor_name: str, args):
     print(f"  Total de combinacoes: {total_combos}")
     print(f"  Folds: 5 (StratifiedKFold)")
     print(f"  Total de fits: {total_combos * 5}")
-    print(f"  Normalizacao: {normalization}")
     print(f"{'='*60}\n")
 
     # Carrega dataset
@@ -661,8 +686,8 @@ def do_gridsearch(extractor_name: str, args):
         param_grid=param_grid,
         scoring="accuracy",
         cv=5,
-        n_jobs=1,
-        verbose=1,
+        n_jobs=-1,
+        verbose=3,
         return_train_score=False,
     )
 
@@ -682,7 +707,6 @@ def do_gridsearch(extractor_name: str, args):
 
     results_df = pd.DataFrame(grid_cv.cv_results_)
     results_df = results_df.sort_values("rank_test_score")
-    results_df.insert(0, "normalization", normalization)
     results_df.to_csv(csv_path, index=False)
 
     print(f"\n{'='*60}")
@@ -692,18 +716,20 @@ def do_gridsearch(extractor_name: str, args):
     print(f"  Top 5 resultados:")
     top5 = results_df.head(5)
     for idx, row in top5.iterrows():
-        print(f"    #{int(row['rank_test_score'])}: accuracy={row['mean_test_score']:.4f} (+/-{row['std_test_score']:.4f}) | {row['params']}")
+        print(
+            f"    #{int(row['rank_test_score'])}: accuracy={row['mean_test_score']:.4f} (+/-{row['std_test_score']:.4f}) | {row['params']}"
+        )
     print(f"{'='*60}\n")
 
 
 def do_all(extractor_name: str, args):
     """Roda extract -> validate -> stats(val) -> test -> stats(test) em sequencia."""
     do_extract(extractor_name, args)
-    
+
     do_validate(extractor_name, args)
     args.result_type = "validation"
     do_stats(extractor_name, args)
-    
+
     do_test(extractor_name, args)
     args.result_type = "test"
     do_stats(extractor_name, args)
@@ -856,9 +882,11 @@ Exemplos de uso:
     )
     _add_extractor_args(sub_test)
     _add_knn_args(sub_test)
-    
+
     # stats: hiper. do extrator para achar a pasta e result type
-    sub_stats = subparsers.add_parser("stats", help="Gera as estatisticas usando predicoes salvas")
+    sub_stats = subparsers.add_parser(
+        "stats", help="Gera as estatisticas usando predicoes salvas"
+    )
     sub_stats.add_argument(
         "--extractor",
         required=True,
@@ -876,20 +904,14 @@ Exemplos de uso:
     # gridsearch: apenas --extractor e --normalization, grids hardcoded
     gridsearch_choices = list(EXTRACTORS.keys())  # sem 'all'
     sub_gridsearch = subparsers.add_parser(
-        "gridsearch", help="Executa grid search exaustivo (5-fold CV) sobre hiperparametros"
+        "gridsearch",
+        help="Executa grid search exaustivo (5-fold CV) sobre hiperparametros",
     )
     sub_gridsearch.add_argument(
         "--extractor",
         required=True,
         choices=gridsearch_choices,
         help="Extrator a usar (sem 'all')",
-    )
-    sub_gridsearch.add_argument(
-        "--normalization",
-        type=str,
-        default=None,
-        choices=["none", "maxabs", "normalizer"],
-        help="Metodo de normalizacao (default: none)",
     )
 
     # all: hiper. do extrator + hiper. do KNN
