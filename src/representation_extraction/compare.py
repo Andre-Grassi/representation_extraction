@@ -14,6 +14,7 @@ from scipy import sparse
 
 from representation_extraction.dataset.dataset import load_dataset
 from representation_extraction.extractors import tfidf, bow, bert
+from representation_extraction.extractors.bert import BertTransformer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FEATURES_DIR = PROJECT_ROOT / "features"
@@ -91,6 +92,12 @@ GRIDSEARCH_PARAM_GRIDS = {
         "knn__weights": ["uniform", "distance"],
     },
     "bert": {
+        "extractor__max_length": [16, 32, 64],
+        "extractor__model_name": [
+            "bert-base-uncased",
+            "bert-large-uncased",
+            "distilbert-base-uncased",
+        ],
         "scaler": [MaxAbsScaler(), Normalizer()],
         "knn__n_neighbors": [3, 7, 11],
         "knn__metric": ["euclidean", "cosine"],
@@ -200,6 +207,7 @@ def _load_params_json(features_dir: Path) -> dict:
     """Carrega params.json da pasta de features."""
     with open(features_dir / "params.json", "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 
 # --------------------------------------------------
@@ -649,9 +657,7 @@ def do_gridsearch(extractor_name: str, args):
     elif extractor_name == "tfidf":
         extractor_step = TfidfVectorizer(stop_words=stop_words_en, lowercase=True)
     elif extractor_name == "bert":
-        raise NotImplementedError(
-            "Grid search com Pipeline nao suportado para BERT (requer transformer wrapper)."
-        )
+        extractor_step = BertTransformer()
 
     # Monta pipeline com passo 'scaler' configurado como 'passthrough' por padrao
     # O GridSearchCV se encarregara de testar os outros definidos no param_grid

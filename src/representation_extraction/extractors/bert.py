@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
 
-import pandas as pd
 import numpy as np
-import nltk
 
-from representation_extraction.dataset.dataset import load_dataset
-
-from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.neighbors import KNeighborsClassifier
-from nltk.corpus import stopwords
-
 from transformers import AutoModel, AutoTokenizer
 import torch
 from tqdm import tqdm
 
 
-def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32, max_length: int = 16):
-
-    # Extrai embeddings de batch_size em batch_size para evitar estouro de memória
+def _extract_embeddings(model, tokenizer, texts: list[str], batch_size: int = 32, max_length: int = 16):
+    """
+    Extrai CLS embeddings em lotes para evitar estouro de memoria.
+    """
     all_embeddings = []
-    all_texts = len(texts)
 
-    for i in tqdm(range(0, all_texts, batch_size), desc="Extraindo embeddings BERT"):
+    for i in tqdm(range(0, len(texts), batch_size), desc="Extraindo embeddings BERT"):
         batch_texts = texts[i : i + batch_size]
 
         model_inputs = tokenizer(
@@ -36,14 +29,45 @@ def extract_features(model, tokenizer, texts: list[str], batch_size: int = 32, m
             model_outputs = model(**model_inputs)
 
         embeddings_cls = model_outputs.last_hidden_state[:, 0, :]
-        all_embeddings.append(embeddings_cls)
+        all_embeddings.append(embeddings_cls.cpu().numpy())
 
-        # Libera memória cache do PyTorch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    X_bert = np.vstack(all_embeddings)
-    return X_bert
+    return np.vstack(all_embeddings)
+
+
+class BertTransformer:
+    """
+    Transformer sklearn-compativel que encapsula a extracao de features BERT.
+    Implementa fit/transform para funcionar dentro de um Pipeline + GridSearchCV.
+    Tambem e usado internamente pela funcao extract().
+    """
+
+    def __init__(self, max_length=16, model_name="bert-base-uncased"):
+        self.max_length = max_length
+        self.model_name = model_name
+
+    def fit(self, X, y=None):
+        self.model_ = AutoModel.from_pretrained(
+            self.model_name, dtype="auto", device_map="auto"
+        )
+        self.tokenizer_ = AutoTokenizer.from_pretrained(self.model_name)
+        return self
+
+    def transform(self, X):
+        texts = list(X) if not isinstance(X, list) else X
+        return _extract_embeddings(
+            self.model_, self.tokenizer_, texts, max_length=self.max_length
+        )
+
+    def get_params(self, deep=True):
+        return {"max_length": self.max_length, "model_name": self.model_name}
+
+    def set_params(self, **params):
+        for key, value in params.items():
+            setattr(self, key, value)
+        return self
 
 
 def extract(
@@ -54,94 +78,28 @@ def extract(
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Extrai features BERT (CLS embeddings) dos textos de treino e teste.
-
-    Args:
-        X_train_texts: Textos de treino.
-        X_test_texts: Textos de teste.
-        max_length: Comprimento maximo da sequencia de tokens.
-        model_name: Nome do modelo HuggingFace a usar.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: (X_train_features, X_test_features) como arrays NumPy densos.
+    Usa o BertTransformer internamente.
     """
-    print(f"Carregando modelo {model_name}...")
-    model = AutoModel.from_pretrained(
-        model_name, dtype="auto", device_map="auto"
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    transformer = BertTransformer(max_length=max_length, model_name=model_name)
+    transformer.fit(X_train_texts)
 
-    print("Extraindo representacao BERT do treino...")
-    X_train = extract_features(model, tokenizer, X_train_texts, max_length=max_length)
-    print("Extraindo representacao BERT do teste...")
-    X_test = extract_features(model, tokenizer, X_test_texts, max_length=max_length)
+    X_train = transformer.transform(X_train_texts)
+    X_test = transformer.transform(X_test_texts)
 
     return X_train, X_test
 
 
-def run(knn: KNeighborsClassifier) -> float:
-
-    # --------------------------------------------------
-    # Load NLTK stopwords
-    # --------------------------------------------------
-
-    try:
-        stop_words_en = stopwords.words("english")
-    except LookupError:
-        nltk.download("stopwords")
-        stop_words_en = stopwords.words("english")
-
-    # --------------------------------------------------
-    # Carrega datasets
-    # --------------------------------------------------
+if __name__ == "__main__":
+    from representation_extraction.dataset.dataset import load_dataset
 
     X_train_texts, y_train = load_dataset("comments_train.txt")
-    X_train_texts_bert = X_train_texts.tolist()
-    y_train_bert = y_train.tolist()
     X_test_texts, y_test = load_dataset("comments_test.txt")
-    X_test_texts_bert = X_test_texts.tolist()
-    y_test_bert = y_test.tolist()
 
-    # --------------------------------------------------
-    # Carrega o BERT
-    # --------------------------------------------------
-    print("Carregando BERT...")
-    model = AutoModel.from_pretrained(
-        "bert-base-uncased", dtype="auto", device_map="auto"
-    )
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-
-    # --------------------------------------------------
-    # BERT
-    # --------------------------------------------------
-    print("Extraindo representacao...")
-    X_train = extract_features(model, tokenizer, X_train_texts_bert)
-    X_test = extract_features(model, tokenizer, X_test_texts_bert)
-    knn.fit(X_train, y_train)
-
-    # --------------------------------------------------
-    # Predição
-    # --------------------------------------------------
-    predictions = knn.predict(X_test)
-    probs = knn.predict_proba(X_test)
-
-    # --------------------------------------------------
-    # Avaliação
-    # --------------------------------------------------
-    from sklearn.metrics import accuracy_score, classification_report
-
-    # print("\nEvaluation:")
-    # print(classification_report(y_test, predictions))
-    from sklearn.metrics import confusion_matrix
-
-    cm = confusion_matrix(y_test, predictions)
-    # print(probs)
-
-    # Pega acurácia do TESTE
-    return float(accuracy_score(y_test, predictions))
-
-
-if __name__ == "__main__":
-    # Cria knn padrão
     knn = KNeighborsClassifier(n_neighbors=7, metric="euclidean")
-    accuracy = run(knn)
-    print(f"Acurácia: {accuracy}")
+
+    X_train, X_test = extract(X_train_texts.tolist(), X_test_texts.tolist())
+    knn.fit(X_train, y_train)
+    predictions = knn.predict(X_test)
+
+    from sklearn.metrics import accuracy_score
+    print(f"Acuracia: {accuracy_score(y_test, predictions):.4f}")
