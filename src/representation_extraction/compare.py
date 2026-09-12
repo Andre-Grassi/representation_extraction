@@ -626,106 +626,206 @@ def do_stats(extractor_name: str, args):
 
 def do_gridsearch(extractor_name: str, args):
     """
-    Etapa de Grid Search: usa Pipeline (extrator + KNN) com GridSearchCV do sklearn
-    para buscar exaustivamente todas as combinacoes de hiperparametros.
-    O sklearn cuida de todas as permutacoes e do 5-fold CV internamente.
+    Etapa de Grid Search: busca exaustivamente todas as combinacoes de hiperparametros.
+
+    Para BoW/TF-IDF: usa Pipeline (extrator + scaler + KNN) com GridSearchCV.
+    Para BERT: itera manualmente sobre as combinacoes do extrator (poucas),
+               extrai features UMA VEZ por combinacao, e roda GridSearchCV
+               apenas nos params do KNN + scaler (evita OOM por re-carregar o modelo).
+
     Salva os resultados em results/{extractor}/gridsearch_results.csv.
     """
     import pandas as pd
-    from sklearn.model_selection import GridSearchCV
+    from sklearn.model_selection import GridSearchCV, ParameterGrid
     from sklearn.pipeline import Pipeline
     from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
     from nltk.corpus import stopwords
     import nltk
 
     if extractor_name == "all":
-        raise ValueError(
-            "Grid search deve ser executado para um extrator especifico, nao 'all'."
-        )
+        raise ValueError("Grid search deve ser executado para um extrator especifico, nao 'all'.")
 
     param_grid = GRIDSEARCH_PARAM_GRIDS[extractor_name]
-
-    # Monta o Pipeline de acordo com o extrator
-    try:
-        stop_words_en = stopwords.words("english")
-    except LookupError:
-        nltk.download("stopwords")
-        stop_words_en = stopwords.words("english")
-
-    if extractor_name == "bow":
-        extractor_step = CountVectorizer(stop_words=stop_words_en, lowercase=True)
-    elif extractor_name == "tfidf":
-        extractor_step = TfidfVectorizer(stop_words=stop_words_en, lowercase=True)
-    elif extractor_name == "bert":
-        extractor_step = BertTransformer()
-
-    # Monta pipeline com passo 'scaler' configurado como 'passthrough' por padrao
-    # O GridSearchCV se encarregara de testar os outros definidos no param_grid
-    steps = [
-        ("extractor", extractor_step),
-        ("scaler", "passthrough"),
-        ("knn", KNeighborsClassifier()),
-    ]
-    pipe = Pipeline(steps)
-
-    # Contagem de combinacoes para log
-    from sklearn.model_selection import ParameterGrid
-
-    total_combos = len(ParameterGrid(param_grid))
-
-    print(f"\n{'='*60}")
-    print(f"  GRID SEARCH - {extractor_name.upper()}")
-    print(f"  Pipeline: {' -> '.join(name for name, _ in steps)}")
-    print(f"  Total de combinacoes: {total_combos}")
-    print(f"  Folds: 3 (StratifiedKFold)")
-    print(f"  Total de fits: {total_combos * 3}")
-    print(f"{'='*60}\n")
+    n_jobs = getattr(args, "n_jobs", 1)
 
     # Carrega dataset
     print("Carregando dataset...")
     X_train_texts, y_train = load_dataset("comments_train.txt")
     y_train_arr = np.array(y_train)
 
-    # GridSearchCV cuida de TUDO: permutacoes, folds, fit, score
-    n_jobs = getattr(args, "n_jobs", -1)
-    grid_cv = GridSearchCV(
-        pipe,
-        param_grid=param_grid,
-        scoring="accuracy",
-        cv=3,
-        n_jobs=n_jobs,
-        verbose=3,
-        return_train_score=False,
-    )
-
-    print("Rodando GridSearchCV...")
-    t1 = time.perf_counter()
-    grid_cv.fit(X_train_texts, y_train_arr)
-    t2 = time.perf_counter()
-
-    print(f"\nGridSearchCV concluido em {t2 - t1:.2f}s")
-    print(f"Melhor accuracy: {grid_cv.best_score_:.4f}")
-    print(f"Melhores params: {grid_cv.best_params_}")
-
-    # Converte cv_results_ diretamente para DataFrame e salva
     results_dir = PROJECT_ROOT / "results" / extractor_name
     os.makedirs(results_dir, exist_ok=True)
     csv_path = results_dir / "gridsearch_results.csv"
 
-    results_df = pd.DataFrame(grid_cv.cv_results_)
-    results_df = results_df.sort_values("rank_test_score")
-    results_df.to_csv(csv_path, index=False)
+    if extractor_name in ("bow", "tfidf"):
+        # --------------------------------------------------
+        # BoW / TF-IDF: Pipeline completo com GridSearchCV
+        # --------------------------------------------------
+        try:
+            stop_words_en = stopwords.words("english")
+        except LookupError:
+            nltk.download("stopwords")
+            stop_words_en = stopwords.words("english")
+
+        if extractor_name == "bow":
+            extractor_step = CountVectorizer(stop_words=stop_words_en, lowercase=True)
+        else:
+            extractor_step = TfidfVectorizer(stop_words=stop_words_en, lowercase=True)
+
+        steps = [
+            ("extractor", extractor_step),
+            ("scaler", "passthrough"),
+            ("knn", BatchedKNeighborsClassifier()),
+        ]
+        pipe = Pipeline(steps)
+
+        total_combos = len(ParameterGrid(param_grid))
+        print(f"\n{'='*60}")
+        print(f"  GRID SEARCH - {extractor_name.upper()}")
+        print(f"  Pipeline: {' -> '.join(name for name, _ in steps)}")
+        print(f"  Total de combinacoes: {total_combos}")
+        print(f"  Folds: 3 | n_jobs: {n_jobs}")
+        print(f"  Total de fits: {total_combos * 3}")
+        print(f"{'='*60}\n")
+
+        grid_cv = GridSearchCV(
+            pipe,
+            param_grid=param_grid,
+            scoring="accuracy",
+            cv=3,
+            n_jobs=n_jobs,
+            verbose=1,
+            return_train_score=False,
+        )
+
+        print("Rodando GridSearchCV...")
+        t1 = time.perf_counter()
+        grid_cv.fit(X_train_texts, y_train_arr)
+        t2 = time.perf_counter()
+
+        print(f"\nGridSearchCV concluido em {t2 - t1:.2f}s")
+        print(f"Melhor accuracy: {grid_cv.best_score_:.4f}")
+        print(f"Melhores params: {grid_cv.best_params_}")
+
+        results_df = pd.DataFrame(grid_cv.cv_results_)
+        results_df = results_df.sort_values("rank_test_score")
+        results_df.to_csv(csv_path, index=False)
+
+    elif extractor_name == "bert":
+        # --------------------------------------------------
+        # BERT: loop manual sobre params do extrator,
+        # GridSearchCV apenas sobre KNN + scaler
+        # --------------------------------------------------
+
+        # Separa params do extrator vs params do KNN+scaler
+        ext_param_grid = {
+            k.replace("extractor__", ""): v
+            for k, v in param_grid.items()
+            if k.startswith("extractor__")
+        }
+        knn_scaler_grid = {
+            k: v
+            for k, v in param_grid.items()
+            if not k.startswith("extractor__")
+        }
+        # Remove prefixo knn__ para o GridSearchCV direto no KNN
+        knn_scaler_grid_clean = {}
+        for k, v in knn_scaler_grid.items():
+            if k.startswith("knn__"):
+                knn_scaler_grid_clean[k.replace("knn__", "")] = v
+            else:
+                knn_scaler_grid_clean[k] = v
+
+        ext_combos = list(ParameterGrid(ext_param_grid))
+        knn_combos_count = len(ParameterGrid(knn_scaler_grid_clean))
+
+        print(f"\n{'='*60}")
+        print(f"  GRID SEARCH - BERT (modo otimizado)")
+        print(f"  Combinacoes do extrator: {len(ext_combos)}")
+        print(f"  Combinacoes KNN+scaler por extrator: {knn_combos_count}")
+        print(f"  Total: {len(ext_combos) * knn_combos_count}")
+        print(f"  Folds: 3 | n_jobs: {n_jobs}")
+        print(f"{'='*60}\n")
+
+        X_train_list = X_train_texts.tolist() if hasattr(X_train_texts, 'tolist') else list(X_train_texts)
+
+        all_results = []
+
+        for i, ext_params in enumerate(ext_combos, 1):
+            print(f"\n--- Extrator combo {i}/{len(ext_combos)}: {ext_params} ---")
+
+            # Extrai features UMA VEZ para esta combinacao
+            transformer = BertTransformer(**ext_params)
+            t1_ext = time.perf_counter()
+            transformer.fit(X_train_list)
+            X_features = transformer.transform(X_train_list)
+            t2_ext = time.perf_counter()
+            print(f"  Extracao: {t2_ext - t1_ext:.2f}s | Shape: {X_features.shape}")
+
+            # Para a busca no scaler, precisamos de Pipeline(scaler, knn)
+            mini_pipe = Pipeline([
+                ("scaler", "passthrough"),
+                ("knn", BatchedKNeighborsClassifier()),
+            ])
+
+            # Ajusta prefixos para o mini pipeline
+            mini_param_grid = {}
+            for k, v in knn_scaler_grid.items():
+                if k.startswith("knn__"):
+                    mini_param_grid[k] = v
+                else:
+                    mini_param_grid[k] = v
+
+            grid_cv = GridSearchCV(
+                mini_pipe,
+                param_grid=mini_param_grid,
+                scoring="accuracy",
+                cv=3,
+                n_jobs=n_jobs,
+                verbose=1,
+                return_train_score=False,
+            )
+
+            print(f"  Rodando GridSearchCV (KNN + scaler)...")
+            t1_grid = time.perf_counter()
+            grid_cv.fit(X_features, y_train_arr)
+            t2_grid = time.perf_counter()
+            print(f"  Concluido em {t2_grid - t1_grid:.2f}s | Melhor: {grid_cv.best_score_:.4f}")
+
+            # Coleta resultados e adiciona os params do extrator
+            cv_df = pd.DataFrame(grid_cv.cv_results_)
+            for k, v in ext_params.items():
+                cv_df[f"param_extractor__{k}"] = str(v) if isinstance(v, (tuple, list)) else v
+            cv_df["time_extraction_s"] = t2_ext - t1_ext
+            all_results.append(cv_df)
+
+            # Libera memoria do modelo BERT
+            del transformer
+            import gc
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+
+        # Consolida todos os resultados
+        results_df = pd.concat(all_results, ignore_index=True)
+        results_df = results_df.sort_values("mean_test_score", ascending=False)
+        results_df.insert(0, "rank_global", range(1, len(results_df) + 1))
+        results_df.to_csv(csv_path, index=False)
 
     print(f"\n{'='*60}")
     print(f"  GRID SEARCH CONCLUIDO - {extractor_name.upper()}")
-    print(f"  Total de combinacoes avaliadas: {total_combos}")
     print(f"  Resultados salvos em: {csv_path}")
     print(f"  Top 5 resultados:")
     top5 = results_df.head(5)
     for idx, row in top5.iterrows():
-        print(
-            f"    #{int(row['rank_test_score'])}: accuracy={row['mean_test_score']:.4f} (+/-{row['std_test_score']:.4f}) | {row['params']}"
-        )
+        score = row['mean_test_score']
+        std = row['std_test_score']
+        params = {k.replace('param_', ''): row[k] for k in row.index if k.startswith('param_')}
+        print(f"    accuracy={score:.4f} (+/-{std:.4f}) | {params}")
     print(f"{'='*60}\n")
 
 
@@ -923,8 +1023,8 @@ Exemplos de uso:
     sub_gridsearch.add_argument(
         "--n-jobs",
         type=int,
-        default=-1,
-        help="Numero de workers em paralelo para o GridSearchCV (default: -1, usa todos os cores)",
+        default=1,
+        help="Numero de workers em paralelo para o GridSearchCV (default: 1, use -1 para todos os cores)",
     )
 
     # all: hiper. do extrator + hiper. do KNN
