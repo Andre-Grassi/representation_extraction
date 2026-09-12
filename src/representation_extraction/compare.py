@@ -13,175 +13,35 @@ from sklearn.metrics import accuracy_score
 from scipy import sparse
 
 from representation_extraction.dataset.dataset import load_dataset
+from representation_extraction.knn.knn import BatchedKNeighborsClassifier
 from representation_extraction.extractors import tfidf, bow, bert
 from representation_extraction.extractors.bert import BertTransformer
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FEATURES_DIR = PROJECT_ROOT / "features"
-PREDICTIONS_DIR = PROJECT_ROOT / "predictions"
-
-from representation_extraction.statistics.statistics import get_statistics
-
-# Extratores disponiveis e se suas features sao esparsas
-EXTRACTORS = {
-    "tfidf": {"module": tfidf, "sparse": True},
-    "bow": {"module": bow, "sparse": True},
-    "bert": {"module": bert, "sparse": False},
-}
-
-# Hiperparametros do extrator: quais args pertencem a cada extrator
-EXTRACTOR_PARAMS = {
-    "tfidf": {"max_features", "ngram_range", "min_df", "max_df", "normalization"},
-    "bow": {"max_features", "ngram_range", "min_df", "max_df", "normalization"},
-    "bert": {"max_length", "model_name", "normalization"},
-}
-
-# Defaults dos hiperparametros dos extratores
-EXTRACTOR_DEFAULTS = {
-    "tfidf": {
-        "max_features": 350,
-        "ngram_range": (1, 2),
-        "min_df": 2,
-        "max_df": 0.9,
-        "normalization": "none",
-    },
-    "bow": {
-        "max_features": 350,
-        "ngram_range": (1, 2),
-        "min_df": 2,
-        "max_df": 0.9,
-        "normalization": "none",
-    },
-    "bert": {
-        "max_length": 16,
-        "model_name": "bert-base-uncased",
-        "normalization": "none",
-    },
-}
-
-# Defaults do KNN
-KNN_DEFAULTS = {"n_neighbors": 7, "metric": "euclidean", "weights": "uniform"}
-
-from sklearn.preprocessing import MaxAbsScaler, Normalizer
-
-# --------------------------------------------------
-# Grids para o Grid Search (param_grid para GridSearchCV com Pipeline)
-# Prefixos: extractor__ para hiperparametros do extrator, knn__ para KNN.
-# O passo 'scaler' testa diferentes métodos de normalização.
-# --------------------------------------------------
-
-GRIDSEARCH_PARAM_GRIDS = {
-    "bow": {
-        "extractor__max_features": [250, 500, 1000],
-        "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
-        "extractor__min_df": [1, 2, 3],
-        "extractor__max_df": [0.8, 0.9, 1.0],
-        "scaler": [MaxAbsScaler(), Normalizer()],
-        "knn__n_neighbors": [3, 7, 11],
-        "knn__metric": ["euclidean", "cosine"],
-        "knn__weights": ["uniform", "distance"],
-    },
-    "tfidf": {
-        "extractor__max_features": [250, 500, 1000],
-        "extractor__ngram_range": [(1, 1), (1, 2), (1, 3)],
-        "extractor__min_df": [1, 2, 3],
-        "extractor__max_df": [0.8, 0.9, 1.0],
-        "scaler": [MaxAbsScaler(), Normalizer()],
-        "knn__n_neighbors": [3, 7, 11],
-        "knn__metric": ["euclidean", "cosine"],
-        "knn__weights": ["uniform", "distance"],
-    },
-    "bert": {
-        "extractor__max_length": [16, 32, 64],
-        "extractor__model_name": [
-            "bert-base-uncased",
-            "bert-large-uncased",
-            "distilbert-base-uncased",
-        ],
-        "scaler": [MaxAbsScaler(), Normalizer()],
-        "knn__n_neighbors": [3, 7, 11],
-        "knn__metric": ["euclidean", "cosine"],
-        "knn__weights": ["uniform", "distance"],
-    },
-}
 
 
-# Enum para indicar se eh teste ou validacao
-class ResultType(Enum):
-    TEST = "test"
-    VALIDATION = "validation"
+from representation_extraction.statistics.statistics import export_results_to_csv, get_statistics
 
 
+from representation_extraction.constants import (
+    PROJECT_ROOT,
+    FEATURES_DIR,
+    PREDICTIONS_DIR,
+    EXTRACTORS,
+    EXTRACTOR_PARAMS,
+    EXTRACTOR_DEFAULTS,
+    KNN_DEFAULTS,
+    GRIDSEARCH_PARAM_GRIDS,
+    ResultType
+)
+from representation_extraction.parse import (
+    build_folder_name,
+    get_extractor_params,
+    get_knn_params,
+    validate_extractor_args
+)
 # --------------------------------------------------
 # Funcoes utilitarias de hiperparametros
 # --------------------------------------------------
-
-
-def _build_folder_name(extractor_name: str, ext_params: dict) -> str:
-    """Gera o nome da subpasta a partir dos hiperparametros do extrator."""
-    norm = ext_params.get("normalization", "none")
-    if extractor_name in ("tfidf", "bow"):
-        mf = ext_params["max_features"]
-        ng_min, ng_max = ext_params["ngram_range"]
-        md = ext_params["min_df"]
-        mxd = ext_params["max_df"]
-        return f"mf{mf}_ng{ng_min}-{ng_max}_md{md}_mxd{mxd}_norm-{norm}"
-    elif extractor_name == "bert":
-        ml = ext_params["max_length"]
-        mn = ext_params["model_name"]
-        return f"ml{ml}_{mn}_norm-{norm}"
-    else:
-        raise ValueError(f"Extrator desconhecido: {extractor_name}")
-
-
-def _get_extractor_params(extractor_name: str, args) -> dict:
-    """Extrai os hiperparametros do extrator a partir dos args do argparse."""
-    defaults = EXTRACTOR_DEFAULTS[extractor_name]
-    params = {}
-    for key in defaults:
-        val = getattr(args, key, None)
-        if val is not None:
-            params[key] = val
-        else:
-            params[key] = defaults[key]
-    # Converte ngram_range de lista para tupla se necessario
-    if "ngram_range" in params and isinstance(params["ngram_range"], list):
-        params["ngram_range"] = tuple(params["ngram_range"])
-    return params
-
-
-def _get_knn_params(args) -> dict:
-    """Extrai os hiperparametros do KNN a partir dos args do argparse."""
-    params = {}
-    for key in KNN_DEFAULTS:
-        val = getattr(args, key, None)
-        if val is not None:
-            params[key] = val
-        else:
-            params[key] = KNN_DEFAULTS[key]
-    return params
-
-
-def _validate_extractor_args(extractor_name: str, args):
-    """Verifica se o usuario nao passou hiperparametros invalidos para o extrator."""
-    if extractor_name == "all":
-        return  # Nao valida quando e 'all' (usa defaults)
-
-    valid_params = EXTRACTOR_PARAMS[extractor_name]
-    all_extractor_params = set()
-    for params in EXTRACTOR_PARAMS.values():
-        all_extractor_params.update(params)
-
-    for param in all_extractor_params:
-        if param not in valid_params:
-            val = getattr(args, param, None)
-            default = None
-            # Checa se o usuario setou explicitamente um param que nao pertence ao extrator
-            if val is not None:
-                raise ValueError(
-                    f"Hiperparametro '--{param.replace('_', '-')}' nao se aplica ao extrator '{extractor_name}'. "
-                    f"Hiperparametros validos para '{extractor_name}': {sorted(valid_params)}"
-                )
 
 
 def _save_params_json(
@@ -207,78 +67,6 @@ def _load_params_json(features_dir: Path) -> dict:
     """Carrega params.json da pasta de features."""
     with open(features_dir / "params.json", "r", encoding="utf-8") as f:
         return json.load(f)
-
-
-
-# --------------------------------------------------
-# Funcoes de exportacao de resultados
-# --------------------------------------------------
-
-
-def export_results_to_csv(
-    representation: str,
-    result_type: ResultType,
-    accuracy: float,
-    ext_params: dict,
-    knn_params: dict,
-    metrics: dict = None,
-):
-    """
-    Exporta os resultados do experimento para um arquivo CSV unificado, fazendo append das execucoes.
-
-    Args:
-        representation (str): Nome do metodo de extracao de caracteristicas.
-        result_type (ResultType): Tipo de resultado (teste ou validacao).
-        accuracy (float): Acuracia obtida.
-        ext_params (dict): Hiperparametros do extrator.
-        knn_params (dict): Hiperparametros do KNN.
-        metrics (dict): Dicionario com as metricas de tempo medidas.
-    """
-    import pandas as pd
-
-    results_dir = PROJECT_ROOT / "results"
-    os.makedirs(results_dir, exist_ok=True)
-
-    # Monta a linha de dados combinando tudo
-    data = {
-        "Extractor": representation,
-        "Accuracy": accuracy,
-    }
-
-    # Adiciona metricas
-    if metrics:
-        for k, v in metrics.items():
-            data[k] = v
-
-    # Adiciona params do extrator convertendo tuplas/listas para string (ex: ngram_range)
-    for k, v in ext_params.items():
-        data[k] = str(v) if isinstance(v, (tuple, list)) else v
-
-    # Adiciona params do KNN
-    for k, v in knn_params.items():
-        data[k] = v
-
-    results_df = pd.DataFrame([data])
-    csv_path = results_dir / f"{result_type.value}_results.csv"
-
-    if not csv_path.exists():
-        results_df.to_csv(csv_path, index=False)
-    else:
-        # Le o CSV existente
-        existing_df = pd.read_csv(csv_path)
-        # Concatena a nova execucao
-        combined_df = pd.concat([existing_df, results_df], ignore_index=True)
-
-        # As colunas que definem a unicidade da execucao sao apenas o Extrator e os Hiperparametros
-        param_cols = ["Extractor"] + list(ext_params.keys()) + list(knn_params.keys())
-
-        # Remove duplicatas baseadas estritamente nos hiperparametros, mantendo sempre a mais recente ('last')
-        combined_df = combined_df.drop_duplicates(subset=param_cols, keep="last")
-
-        # Salva o arquivo atualizado sobrescrevendo o antigo
-        combined_df.to_csv(csv_path, index=False)
-
-    print(f"  Resultado salvo/atualizado em: {csv_path}")
 
 
 # --------------------------------------------------
@@ -346,8 +134,8 @@ def do_extract(extractor_name: str, args):
     Etapa de extracao: carrega dataset, extrai features, faz split 80/20 estratificado,
     e salva 6 arquivos em features/<extractor_name>/<folder_name>/.
     """
-    ext_params = _get_extractor_params(extractor_name, args)
-    folder_name = _build_folder_name(extractor_name, ext_params)
+    ext_params = get_extractor_params(extractor_name, args)
+    folder_name = build_folder_name(extractor_name, ext_params)
     feat_dir = FEATURES_DIR / extractor_name / folder_name
 
     print(f"\n{'='*60}")
@@ -434,9 +222,9 @@ def do_validate(extractor_name: str, args):
     Etapa de validacao: carrega X_train, X_val da pasta features/<extractor_name>/<folder>/,
     treina KNN no train (80%), avalia no val (20%).
     """
-    ext_params = _get_extractor_params(extractor_name, args)
-    knn_params = _get_knn_params(args)
-    folder_name = _build_folder_name(extractor_name, ext_params)
+    ext_params = get_extractor_params(extractor_name, args)
+    knn_params = get_knn_params(args)
+    folder_name = build_folder_name(extractor_name, ext_params)
     feat_dir = FEATURES_DIR / extractor_name / folder_name
 
     if not feat_dir.exists():
@@ -502,9 +290,9 @@ def do_test(extractor_name: str, args):
     Etapa de teste: carrega X_train, X_test da pasta features/<extractor_name>/<folder>/,
     treina KNN no train (80%), avalia no test.
     """
-    ext_params = _get_extractor_params(extractor_name, args)
-    knn_params = _get_knn_params(args)
-    folder_name = _build_folder_name(extractor_name, ext_params)
+    ext_params = get_extractor_params(extractor_name, args)
+    knn_params = get_knn_params(args)
+    folder_name = build_folder_name(extractor_name, ext_params)
     feat_dir = FEATURES_DIR / extractor_name / folder_name
 
     if not feat_dir.exists():
@@ -574,8 +362,8 @@ def do_stats(extractor_name: str, args):
         raise ValueError("--result-type e obrigatorio para a etapa stats")
 
     res_type = ResultType(res_type_str)
-    ext_params = _get_extractor_params(extractor_name, args)
-    folder_name = _build_folder_name(extractor_name, ext_params)
+    ext_params = get_extractor_params(extractor_name, args)
+    folder_name = build_folder_name(extractor_name, ext_params)
 
     feat_dir = FEATURES_DIR / extractor_name / folder_name
     pred_dir = PREDICTIONS_DIR / res_type.value / extractor_name / folder_name
@@ -603,7 +391,7 @@ def do_stats(extractor_name: str, args):
 
     time_metrics = pred_params.get("metrics", {})
     # O knn params salvo na predicao eh a fonte da verdade para o deduplicador
-    real_knn_params = pred_params.get("knn_params", _get_knn_params(args))
+    real_knn_params = pred_params.get("knn_params", get_knn_params(args))
 
     stats = get_statistics(y_true, y_pred, time_metrics)
     accuracy = stats.pop("Accuracy")
@@ -643,7 +431,9 @@ def do_gridsearch(extractor_name: str, args):
     import nltk
 
     if extractor_name == "all":
-        raise ValueError("Grid search deve ser executado para um extrator especifico, nao 'all'.")
+        raise ValueError(
+            "Grid search deve ser executado para um extrator especifico, nao 'all'."
+        )
 
     param_grid = GRIDSEARCH_PARAM_GRIDS[extractor_name]
     n_jobs = getattr(args, "n_jobs", 1)
@@ -724,9 +514,7 @@ def do_gridsearch(extractor_name: str, args):
             if k.startswith("extractor__")
         }
         knn_scaler_grid = {
-            k: v
-            for k, v in param_grid.items()
-            if not k.startswith("extractor__")
+            k: v for k, v in param_grid.items() if not k.startswith("extractor__")
         }
         # Remove prefixo knn__ para o GridSearchCV direto no KNN
         knn_scaler_grid_clean = {}
@@ -747,7 +535,11 @@ def do_gridsearch(extractor_name: str, args):
         print(f"  Folds: 3 | n_jobs: {n_jobs}")
         print(f"{'='*60}\n")
 
-        X_train_list = X_train_texts.tolist() if hasattr(X_train_texts, 'tolist') else list(X_train_texts)
+        X_train_list = (
+            X_train_texts.tolist()
+            if hasattr(X_train_texts, "tolist")
+            else list(X_train_texts)
+        )
 
         all_results = []
 
@@ -763,10 +555,12 @@ def do_gridsearch(extractor_name: str, args):
             print(f"  Extracao: {t2_ext - t1_ext:.2f}s | Shape: {X_features.shape}")
 
             # Para a busca no scaler, precisamos de Pipeline(scaler, knn)
-            mini_pipe = Pipeline([
-                ("scaler", "passthrough"),
-                ("knn", BatchedKNeighborsClassifier()),
-            ])
+            mini_pipe = Pipeline(
+                [
+                    ("scaler", "passthrough"),
+                    ("knn", BatchedKNeighborsClassifier()),
+                ]
+            )
 
             # Ajusta prefixos para o mini pipeline
             mini_param_grid = {}
@@ -790,21 +584,27 @@ def do_gridsearch(extractor_name: str, args):
             t1_grid = time.perf_counter()
             grid_cv.fit(X_features, y_train_arr)
             t2_grid = time.perf_counter()
-            print(f"  Concluido em {t2_grid - t1_grid:.2f}s | Melhor: {grid_cv.best_score_:.4f}")
+            print(
+                f"  Concluido em {t2_grid - t1_grid:.2f}s | Melhor: {grid_cv.best_score_:.4f}"
+            )
 
             # Coleta resultados e adiciona os params do extrator
             cv_df = pd.DataFrame(grid_cv.cv_results_)
             for k, v in ext_params.items():
-                cv_df[f"param_extractor__{k}"] = str(v) if isinstance(v, (tuple, list)) else v
+                cv_df[f"param_extractor__{k}"] = (
+                    str(v) if isinstance(v, (tuple, list)) else v
+                )
             cv_df["time_extraction_s"] = t2_ext - t1_ext
             all_results.append(cv_df)
 
             # Libera memoria do modelo BERT
             del transformer
             import gc
+
             gc.collect()
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:
@@ -822,9 +622,11 @@ def do_gridsearch(extractor_name: str, args):
     print(f"  Top 5 resultados:")
     top5 = results_df.head(5)
     for idx, row in top5.iterrows():
-        score = row['mean_test_score']
-        std = row['std_test_score']
-        params = {k.replace('param_', ''): row[k] for k in row.index if k.startswith('param_')}
+        score = row["mean_test_score"]
+        std = row["std_test_score"]
+        params = {
+            k.replace("param_", ""): row[k] for k in row.index if k.startswith("param_")
+        }
         print(f"    accuracy={score:.4f} (+/-{std:.4f}) | {params}")
     print(f"{'='*60}\n")
 
@@ -1049,7 +851,7 @@ def main():
 
     # Valida hiperparametros do extrator
     if args.extractor != "all" and args.stage not in ("gridsearch",):
-        _validate_extractor_args(args.extractor, args)
+        validate_extractor_args(args.extractor, args)
 
     stage_map = {
         "extract": do_extract,
