@@ -1,2 +1,4 @@
 sklearn-env/*
+features/*
+dataset/*
 __pycache__
