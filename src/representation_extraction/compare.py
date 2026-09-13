@@ -16,9 +16,10 @@ from representation_extraction.dataset.dataset import load_dataset
 from representation_extraction.knn.knn import BatchedKNeighborsClassifier
 
 
-
-
-from representation_extraction.statistics.statistics import export_results_to_csv, get_statistics
+from representation_extraction.statistics.statistics import (
+    export_results_to_csv,
+    get_statistics,
+)
 
 
 from representation_extraction.constants import (
@@ -30,14 +31,15 @@ from representation_extraction.constants import (
     EXTRACTOR_DEFAULTS,
     KNN_DEFAULTS,
     GRIDSEARCH_PARAM_GRIDS,
-    ResultType
+    ResultType,
 )
 from representation_extraction.parse import (
     build_folder_name,
     get_extractor_params,
     get_knn_params,
-    validate_extractor_args
+    validate_extractor_args,
 )
+
 # --------------------------------------------------
 # Funcoes utilitarias de hiperparametros
 # --------------------------------------------------
@@ -556,7 +558,7 @@ def do_gridsearch(extractor_name: str, args):
                 scoring="accuracy",
                 cv=3,
                 n_jobs=n_jobs,
-                verbose=1,
+                verbose=3,
                 return_train_score=False,
             )
 
