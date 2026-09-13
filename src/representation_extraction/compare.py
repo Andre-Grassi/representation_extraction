@@ -527,14 +527,39 @@ def do_gridsearch(extractor_name: str, args):
         for i, ext_params in enumerate(ext_combos, 1):
             print(f"\n--- Extrator combo {i}/{len(ext_combos)}: {ext_params} ---")
 
-            # Extrai features UMA VEZ para esta combinacao
-            ExtractorClass = EXTRACTORS["bert"]["class"]
-            transformer = ExtractorClass(**ext_params)
-            t1_ext = time.perf_counter()
-            transformer.fit(X_train_list)
-            X_features = transformer.transform(X_train_list)
-            t2_ext = time.perf_counter()
-            print(f"  Extracao: {t2_ext - t1_ext:.2f}s | Shape: {X_features.shape}")
+            # Configura os parametros para buscar/salvar no cache (sem normalização)
+            ext_params_cache = ext_params.copy()
+            ext_params_cache["normalization"] = "none"
+            folder_name = build_folder_name("bert", ext_params_cache)
+            feat_dir = FEATURES_DIR / "bert" / folder_name
+
+            if not feat_dir.exists():
+                print(f"  [CACHE] Features não encontradas em {folder_name}.")
+                print(f"  [CACHE] Executando extração completa (será salva em disco)...")
+                mock_args = argparse.Namespace(**ext_params_cache)
+                do_extract("bert", mock_args)
+            else:
+                print(f"  [CACHE] Features já existem em {folder_name}. Carregando do disco...")
+
+            # Carrega as features do disco
+            X_train_split = _load_features("bert", feat_dir, "X_train")
+            X_val_split = _load_features("bert", feat_dir, "X_val")
+            y_train_split = _load_labels(feat_dir, "y_train")
+            y_val_split = _load_labels(feat_dir, "y_val")
+
+            # Reconstrói os arrays unificados (100% do treino) para o CV interno do GridSearchCV
+            X_features = np.concatenate([X_train_split, X_val_split], axis=0)
+            y_train_arr_local = np.concatenate([y_train_split, y_val_split], axis=0)
+
+            # Recupera o tempo de extração do json
+            t_ext = 0.0
+            params_json_path = feat_dir / "params.json"
+            if params_json_path.exists():
+                with open(params_json_path, "r", encoding="utf-8") as f:
+                    saved_params = json.load(f)
+                    t_ext = saved_params.get("metrics", {}).get("time_extraction_s", 0.0)
+
+            print(f"  [CACHE] Shape features reconstruídas: {X_features.shape}")
 
             # Para a busca no scaler, precisamos de Pipeline(scaler, knn)
             mini_pipe = Pipeline(
@@ -564,7 +589,7 @@ def do_gridsearch(extractor_name: str, args):
 
             print(f"  Rodando GridSearchCV (KNN + scaler)...")
             t1_grid = time.perf_counter()
-            grid_cv.fit(X_features, y_train_arr)
+            grid_cv.fit(X_features, y_train_arr_local)
             t2_grid = time.perf_counter()
             print(
                 f"  Concluido em {t2_grid - t1_grid:.2f}s | Melhor: {grid_cv.best_score_:.4f}"
@@ -576,7 +601,7 @@ def do_gridsearch(extractor_name: str, args):
                 cv_df[f"param_extractor__{k}"] = (
                     str(v) if isinstance(v, (tuple, list)) else v
                 )
-            cv_df["time_extraction_s"] = t2_ext - t1_ext
+            cv_df["time_extraction_s"] = t_ext
             all_results.append(cv_df)
 
             # --- Consolidacao parcial (Checkpoint) ---
@@ -587,14 +612,11 @@ def do_gridsearch(extractor_name: str, args):
             print(f"  [Checkpoint] Resultados salvos parcialmente em {csv_path.name}")
             # -----------------------------------------
 
-            # Libera memoria do modelo BERT
-            del transformer
+            # Limpeza de memória
             import gc
-
             gc.collect()
             try:
                 import torch
-
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:
