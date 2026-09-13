@@ -297,18 +297,31 @@ def do_test(extractor_name: str, args):
     print(f"  KNN params: {knn_params}")
     print(f"{'='*60}")
 
-    X_train = _load_features(extractor_name, feat_dir, "X_train")
-    y_train = _load_labels(feat_dir, "y_train")
+    X_train_split = _load_features(extractor_name, feat_dir, "X_train")
+    y_train_split = _load_labels(feat_dir, "y_train")
+    X_val_split = _load_features(extractor_name, feat_dir, "X_val")
+    y_val_split = _load_labels(feat_dir, "y_val")
+    
+    # Treinar no conjunto completo (100% do comments_train.txt)
+    import scipy.sparse
+    if scipy.sparse.issparse(X_train_split):
+        import scipy.sparse as sp
+        X_train_full = sp.vstack([X_train_split, X_val_split])
+    else:
+        X_train_full = np.concatenate([X_train_split, X_val_split], axis=0)
+    
+    y_train_full = np.concatenate([y_train_split, y_val_split], axis=0)
+
     X_test = _load_features(extractor_name, feat_dir, "X_test")
     y_test = _load_labels(feat_dir, "y_test")
 
-    print(f"  X_train shape: {X_train.shape}")
+    print(f"  X_train_full shape (Treino 100%): {X_train_full.shape}")
     print(f"  X_test shape:  {X_test.shape}")
 
     knn = KNeighborsClassifier(**knn_params)
-    print("Treinando KNN...")
+    print("Treinando KNN no dataset de treino completo...")
     t1_train = time.perf_counter()
-    knn.fit(X_train, y_train)
+    knn.fit(X_train_full, y_train_full)
     t2_train = time.perf_counter()
     print(f"[METRICA] Treinamento KNN: {t2_train - t1_train:.4f}s")
 
