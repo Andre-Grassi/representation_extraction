@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-
-import pandas as pd
 import nltk
-
-from representation_extraction.dataset.dataset import load_dataset
-
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import KNeighborsClassifier
 from nltk.corpus import stopwords
 from scipy.sparse import csr_matrix
 
+from representation_extraction.dataset.dataset import load_dataset
+from .base import BaseExtractor
 
 def _get_stopwords():
     try:
@@ -18,112 +15,72 @@ def _get_stopwords():
         nltk.download("stopwords")
         return stopwords.words("english")
 
+class TfidfExtractor(BaseExtractor):
+    def __init__(
+        self,
+        max_features: int = 350,
+        ngram_range: tuple = (1, 2),
+        min_df: int = 2,
+        max_df: float = 0.9,
+        normalization: str = "none"
+    ):
+        self.max_features = max_features
+        self.ngram_range = ngram_range
+        self.min_df = min_df
+        self.max_df = max_df
+        self.normalization = normalization
+        self.vectorizer_ = None
+
+    def fit(self, X, y=None):
+        stop_words_en = _get_stopwords()
+        self.vectorizer_ = TfidfVectorizer(
+            stop_words=stop_words_en,
+            max_features=self.max_features,
+            ngram_range=self.ngram_range,
+            lowercase=True,
+            min_df=self.min_df,
+            max_df=self.max_df,
+        )
+        self.vectorizer_.fit(X)
+        return self
+
+    def transform(self, X):
+        return self.vectorizer_.transform(X)
+
 
 def extract(
     X_train_texts,
     X_test_texts,
     max_features: int = 350,
-    ngram_range: tuple[int, int] = (1, 2),
+    ngram_range: tuple = (1, 2),
     min_df: int = 2,
     max_df: float = 0.9,
 ) -> tuple[csr_matrix, csr_matrix]:
-    """
-    Extrai features TF-IDF dos textos de treino e teste.
-
-    Args:
-        X_train_texts: Textos de treino.
-        X_test_texts: Textos de teste.
-        max_features: Numero maximo de features.
-        ngram_range: Range de n-grams (min, max).
-        min_df: Frequencia minima do documento.
-        max_df: Frequencia maxima do documento.
-
-    Returns:
-        tuple[csr_matrix, csr_matrix]: (X_train_features, X_test_features) como matrizes esparsas CSR.
-    """
-    stop_words_en = _get_stopwords()
-
-    vectorizer = TfidfVectorizer(
-        stop_words=stop_words_en,
+    extractor = TfidfExtractor(
         max_features=max_features,
         ngram_range=ngram_range,
-        lowercase=True,
         min_df=min_df,
         max_df=max_df,
     )
-
-    X_train = vectorizer.fit_transform(X_train_texts)
-    X_test = vectorizer.transform(X_test_texts)
-
-    return X_train, X_test
+    return extractor.extract(X_train_texts, X_test_texts)
 
 
 def run(knn: KNeighborsClassifier) -> float:
-
-    # --------------------------------------------------
-    # Load NLTK stopwords
-    # --------------------------------------------------
-
-    try:
-        stop_words_en = stopwords.words("english")
-    except LookupError:
-        nltk.download("stopwords")
-        stop_words_en = stopwords.words("english")
-
-    # --------------------------------------------------
-    # Carrega datasets
-    # --------------------------------------------------
-
     X_train_texts, y_train = load_dataset("comments_train.txt")
     X_test_texts, y_test = load_dataset("comments_test.txt")
 
-    # --------------------------------------------------
-    # TF-IDF
-    # --------------------------------------------------
     print("Extraindo representacao...")
-    vectorizer = TfidfVectorizer(
-        stop_words=stop_words_en,
-        max_features=350,
-        ngram_range=(1, 2),
-        lowercase=True,
-        min_df=2,
-        max_df=0.9,
-    )
+    extractor = TfidfExtractor()
+    X_train, X_test = extractor.extract(X_train_texts, X_test_texts)
 
-    X_train = vectorizer.fit_transform(X_train_texts)
-    X_test = vectorizer.transform(X_test_texts)
-
-    feature_names = vectorizer.get_feature_names_out()
-
-    # --------------------------------------------------
-    # Modelo
-    # --------------------------------------------------
     print("Classificando com kNN...")
     knn.fit(X_train, y_train)
 
-    # --------------------------------------------------
-    # Predição
-    # --------------------------------------------------
     predictions = knn.predict(X_test)
-    probs = knn.predict_proba(X_test)
-
-    # --------------------------------------------------
-    # Avaliação
-    # --------------------------------------------------
-    from sklearn.metrics import accuracy_score, classification_report
-
-    # print("\nEvaluation:")
-    # print(classification_report(y_test, predictions))
-    from sklearn.metrics import confusion_matrix
-
-    cm = confusion_matrix(y_test, predictions)
-    # print(probs)
-
-    # Pega acurácia do TESTE
+    
+    from sklearn.metrics import accuracy_score
     return float(accuracy_score(y_test, predictions))
 
-
 if __name__ == "__main__":
-    # Cria knn padrão
     knn = KNeighborsClassifier(n_neighbors=7, metric="euclidean")
     run(knn)

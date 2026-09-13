@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-
 import numpy as np
-
 from sklearn.neighbors import KNeighborsClassifier
 from transformers import AutoModel, AutoTokenizer
 import torch
 from tqdm import tqdm
 
+from representation_extraction.dataset.dataset import load_dataset
+from .base import BaseExtractor
 
 def _extract_embeddings(model, tokenizer, texts: list[str], batch_size: int = 32, max_length: int = 16):
     """
@@ -37,16 +37,19 @@ def _extract_embeddings(model, tokenizer, texts: list[str], batch_size: int = 32
     return np.vstack(all_embeddings)
 
 
-class BertTransformer:
+class BertExtractor(BaseExtractor):
     """
     Transformer sklearn-compativel que encapsula a extracao de features BERT.
-    Implementa fit/transform para funcionar dentro de um Pipeline + GridSearchCV.
-    Tambem e usado internamente pela funcao extract().
     """
-
-    def __init__(self, max_length=16, model_name="bert-base-uncased"):
+    def __init__(
+        self, 
+        max_length: int = 16, 
+        model_name: str = "bert-base-uncased",
+        normalization: str = "none"
+    ):
         self.max_length = max_length
         self.model_name = model_name
+        self.normalization = normalization
 
     def fit(self, X, y=None):
         self.model_ = AutoModel.from_pretrained(
@@ -61,14 +64,8 @@ class BertTransformer:
             self.model_, self.tokenizer_, texts, max_length=self.max_length
         )
 
-    def get_params(self, deep=True):
-        return {"max_length": self.max_length, "model_name": self.model_name}
-
-    def set_params(self, **params):
-        for key, value in params.items():
-            setattr(self, key, value)
-        return self
-
+# Mantenho "BertTransformer" p/ retrocompatibilidade se algo importar diretamente
+BertTransformer = BertExtractor
 
 def extract(
     X_train_texts: list[str],
@@ -76,22 +73,11 @@ def extract(
     max_length: int = 16,
     model_name: str = "bert-base-uncased",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Extrai features BERT (CLS embeddings) dos textos de treino e teste.
-    Usa o BertTransformer internamente.
-    """
-    transformer = BertTransformer(max_length=max_length, model_name=model_name)
-    transformer.fit(X_train_texts)
-
-    X_train = transformer.transform(X_train_texts)
-    X_test = transformer.transform(X_test_texts)
-
-    return X_train, X_test
+    extractor = BertExtractor(max_length=max_length, model_name=model_name)
+    return extractor.extract(X_train_texts, X_test_texts)
 
 
 if __name__ == "__main__":
-    from representation_extraction.dataset.dataset import load_dataset
-
     X_train_texts, y_train = load_dataset("comments_train.txt")
     X_test_texts, y_test = load_dataset("comments_test.txt")
 

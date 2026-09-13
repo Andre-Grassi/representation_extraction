@@ -10,9 +10,9 @@ PREDICTIONS_DIR = PROJECT_ROOT / "predictions"
 
 # Extratores disponiveis e se suas features sao esparsas
 EXTRACTORS = {
-    "tfidf": {"module": tfidf, "sparse": True},
-    "bow": {"module": bow, "sparse": True},
-    "bert": {"module": bert, "sparse": False},
+    "tfidf": {"module": tfidf, "class": tfidf.TfidfExtractor, "sparse": True},
+    "bow": {"module": bow, "class": bow.BowExtractor, "sparse": True},
+    "bert": {"module": bert, "class": bert.BertExtractor, "sparse": False},
 }
 
 # Hiperparametros do extrator: quais args pertencem a cada extrator

@@ -14,8 +14,7 @@ from scipy import sparse
 
 from representation_extraction.dataset.dataset import load_dataset
 from representation_extraction.knn.knn import BatchedKNeighborsClassifier
-from representation_extraction.extractors import tfidf, bow, bert
-from representation_extraction.extractors.bert import BertTransformer
+
 
 
 
@@ -144,7 +143,7 @@ def do_extract(extractor_name: str, args):
     print(f"  Params: {ext_params}")
     print(f"{'='*60}")
 
-    ext_module = EXTRACTORS[extractor_name]["module"]
+    ExtractorClass = EXTRACTORS[extractor_name]["class"]
 
     # Carrega dataset
     print("Carregando dataset...")
@@ -156,25 +155,13 @@ def do_extract(extractor_name: str, args):
         X_train_texts = X_train_texts.tolist()
         X_test_texts = X_test_texts.tolist()
 
-    # Extrai features com hiperparametros
+    # Instancia o extrator com os parâmetros
+    extractor_instance = ExtractorClass(**ext_params)
+
+    # Extrai features
     print(f"Extraindo features com {extractor_name}...")
     t1_extract = time.perf_counter()
-    if extractor_name in ("tfidf", "bow"):
-        X_train_full, X_test = ext_module.extract(
-            X_train_texts,
-            X_test_texts,
-            max_features=ext_params["max_features"],
-            ngram_range=ext_params["ngram_range"],
-            min_df=ext_params["min_df"],
-            max_df=ext_params["max_df"],
-        )
-    elif extractor_name == "bert":
-        X_train_full, X_test = ext_module.extract(
-            X_train_texts,
-            X_test_texts,
-            max_length=ext_params["max_length"],
-            model_name=ext_params["model_name"],
-        )
+    X_train_full, X_test = extractor_instance.extract(X_train_texts, X_test_texts)
     t2_extract = time.perf_counter()
 
     print(f"[METRICA] Extracao: {t2_extract - t1_extract:.4f}s")
@@ -451,16 +438,8 @@ def do_gridsearch(extractor_name: str, args):
         # --------------------------------------------------
         # BoW / TF-IDF: Pipeline completo com GridSearchCV
         # --------------------------------------------------
-        try:
-            stop_words_en = stopwords.words("english")
-        except LookupError:
-            nltk.download("stopwords")
-            stop_words_en = stopwords.words("english")
-
-        if extractor_name == "bow":
-            extractor_step = CountVectorizer(stop_words=stop_words_en, lowercase=True)
-        else:
-            extractor_step = TfidfVectorizer(stop_words=stop_words_en, lowercase=True)
+        ExtractorClass = EXTRACTORS[extractor_name]["class"]
+        extractor_step = ExtractorClass()
 
         steps = [
             ("extractor", extractor_step),
@@ -547,7 +526,8 @@ def do_gridsearch(extractor_name: str, args):
             print(f"\n--- Extrator combo {i}/{len(ext_combos)}: {ext_params} ---")
 
             # Extrai features UMA VEZ para esta combinacao
-            transformer = BertTransformer(**ext_params)
+            ExtractorClass = EXTRACTORS["bert"]["class"]
+            transformer = ExtractorClass(**ext_params)
             t1_ext = time.perf_counter()
             transformer.fit(X_train_list)
             X_features = transformer.transform(X_train_list)
