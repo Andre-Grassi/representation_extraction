@@ -579,6 +579,14 @@ def do_gridsearch(extractor_name: str, args):
             cv_df["time_extraction_s"] = t2_ext - t1_ext
             all_results.append(cv_df)
 
+            # --- Consolidacao parcial (Checkpoint) ---
+            partial_df = pd.concat(all_results, ignore_index=True)
+            partial_df = partial_df.sort_values("mean_test_score", ascending=False)
+            partial_df.insert(0, "rank_global", range(1, len(partial_df) + 1))
+            partial_df.to_csv(csv_path, index=False)
+            print(f"  [Checkpoint] Resultados salvos parcialmente em {csv_path.name}")
+            # -----------------------------------------
+
             # Libera memoria do modelo BERT
             del transformer
             import gc
