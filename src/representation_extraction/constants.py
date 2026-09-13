@@ -73,7 +73,7 @@ GRIDSEARCH_PARAM_GRIDS = {
         "knn__weights": ["uniform", "distance"],
     },
     "bert": {
-        "extractor__max_length": [64, 64 * 2, 64 * 4],
+        "extractor__max_length": [32, 32 * 4, 32 * 16],
         "extractor__model_name": ["bert-base-uncased"],
         "scaler": [MaxAbsScaler(), Normalizer()],
         "knn__n_neighbors": [3, 7, 11],
